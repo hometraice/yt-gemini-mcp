@@ -1,4 +1,4 @@
-> Version: v4.0 | 2026-11-21 | 公開版：用 git clone 安裝、移除本機路徑、補上授權與回報漏洞方式
+> Version: v4.1 | 2026-11-21 | 怎麼選 profile、503 短重試與錯誤分類、模型對照工具、preview 模型的限制
 
 # yt-gemini-mcp
 
@@ -24,7 +24,7 @@
 | SSRF／濫用 | 只接受 `youtube.com/watch?v=`、`youtu.be/`、`youtube.com/shorts/`、`m.youtube.com/watch?v=`；host 白名單完全比對；ID 必須是 11 碼；一律用 ID 重組 `https://www.youtube.com/watch?v=<ID>` 再送出 |
 | Prompt injection | system instruction 規定影片內的指令只能轉述、不可執行；回傳結果包在 `<untrusted_video_analysis>` 裡，開始與結束標記帶每次隨機產生的 id（影片內容無法偽造結尾），並中和內容裡偽造的標記（含全形與看不見的字元）；tutorial 模式在結尾提醒「執行前必須人工審查」；Gemini 的原始錯誤訊息不放進回覆 |
 | 供應鏈 | 只有 `mcp`、`google-genai`、`keyring` 三個直接相依，版本用 `==` 固定、`uv.lock` 鎖定，啟動時用 `--locked`；`exclude-newer` 排除剛發布的版本 |
-| 額度／資源 | 整次呼叫有總時間上限（Chat 70 秒、Code 240 秒，含備援）；關閉 SDK 自動重試，改成主要模型失敗時換備援模型（最多 3 個）；每日額度用完的模型當天直接跳過；呼叫上限（同時 2 個、每分鐘 5 次、24 小時 100 次，超過就拒絕）；預設低 media resolution；token 用量寫進 log（只有數字） |
+| 額度／資源 | 整次呼叫有總時間上限（Chat 70 秒、Code 240 秒，含備援）；關閉 SDK 自動重試，改成主要模型失敗時換備援模型（最多 3 個），快速回 503 時對同一模型最多短重試 1 次；每日額度用完的模型當天直接跳過；呼叫上限（同時 2 個、每分鐘 5 次、24 小時 100 次，超過就拒絕）；預設低 media resolution；token 用量寫進 log（只有數字） |
 
 發現資安問題請依 [SECURITY.md](SECURITY.md) 私下回報，不要開公開的 issue。
 
@@ -46,6 +46,7 @@ yt-gemini-mcp/
 │   ├── quota.py          每日額度用完的模型（只存在記憶體）
 │   ├── ratelimit.py      呼叫上限：同時進行數、每分鐘、每 24 小時
 │   └── untrusted.py      不可信資料標記
+├── tools/              開發用工具（compare_models.py：模型對照，會消耗額度，要明確加參數才執行）
 ├── tests/              單元測試與實際呼叫測試
 ├── pyproject.toml      專案設定與程式版本（SemVer）
 ├── uv.lock             鎖定所有套件的版本與 hash
@@ -138,6 +139,17 @@ uv run set_key.py --check
 
 ---
 
+## 怎麼選 profile
+
+每個 Claude 入口註冊一次，註冊時選一個 profile。白話對照：
+
+| 你在哪裡用 | profile | 會得到什麼 |
+|---|---|---|
+| Claude Desktop 一般 Chat、網頁版、手機 App（經由桌機） | `chat` | 用 `gemini-3.5-flash-lite`，通常 5–20 秒就有結果。這些入口大約 80 秒就放棄等待，所以 `chat` 一定在 70 秒內結束 |
+| Claude Code（終端機、Code 分頁、Remote Control） | `code` | 用分析較深的 `gemini-3.8-flash`（常要 1–3 分鐘），失敗時改用 flash-lite。適合長影片、教學影片、詳細筆記 |
+
+簡單記：隨手問問 → `chat`；想把影片內容完整整理、可以等 → 在 Claude Code 用 `code`。
+
 ## 註冊到 Claude Code
 
 在 Git Bash 執行（PowerShell 5.1 處理 `--` 參數的方式不同，所以用 Git Bash）：
@@ -227,6 +239,7 @@ claude mcp list
 - 回覆最後一行會寫出模型和它的角色，例如「模型：gemini-3.5-flash-lite，chat 入口的主要模型」：
   - **chat 入口的主要模型**：Chat、網頁版、手機因為約 80 秒的限制，本來就用速度快的 flash-lite，不是額度或錯誤造成的。要更深入的分析，請改用 Claude Code
   - **備援模型**：主要模型失敗了，下一行會寫原因（逾時、HTTP 錯誤碼或今日額度已用完）
+  - **重試 1 次後成功**：Gemini 幾秒內就回 503（過載），server 等 1.5 秒後對同一個模型再試一次。只有剩下的時間夠才會重試，每個模型最多 1 次
   - 最後的 `yt-gemini-mcp v…` 是目前載入的程式版本；更新後還看到舊版號，代表要完全重開 Claude Desktop
 - 回覆最後寫了「今日額度已用完」，代表那個模型要等每日重置（太平洋時間午夜，台灣時間約 16:00）才會再用。
 
@@ -256,7 +269,7 @@ Claude 不會因為看過影片就「記住」。要讓它以後都會用，要�
 | `chat` | `gemini-3.5-flash-lite` | 無 | `low` | 70 秒／35 秒 |
 | `code` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` | `medium` | 240 秒／150 秒 |
 
-- `model`、`fallback_models`：主要模型逾時、過載（5xx）或額度用完（429）時，依序改用備援模型（最多 3 個）
+- `model`、`fallback_models`：主要模型逾時、過載（5xx）或額度用完（429）時，依序改用備援模型（最多 3 個）。換備援之前，快速回 503 的模型會先在自己的等待時間內短重試 1 次
 - `thinking_level`：`low`／`medium`／`high`。越高越深入，但越慢、用量越多
 - `timeout_seconds`：整次呼叫的總上限；`attempt_timeout_seconds`：主要模型最多等幾秒就換備援
 - `[gemini]` 的 `max_output_tokens`：回應長度上限，預設 16384
@@ -295,6 +308,17 @@ uv run python -m unittest -v
 $env:YT_GEMINI_LIVE_TEST = "1"; uv run python -m unittest tests.test_live -v; Remove-Item Env:YT_GEMINI_LIVE_TEST
 ```
 
+**比較兩個模型**（開發用，⚠️ 會消耗額度）：`tools/compare_models.py` 用同一支影片、同一個 mode，對最多兩個模型各跑一次，記錄耗時和 token 數，方便決定 profile 要用哪個模型。
+
+```powershell
+uv run tools/compare_models.py "https://youtu.be/<影片ID>" --mode summary --start 0 --end 300
+```
+
+- 沒加 `--yes-use-quota` 時只印出會做什麼（dry-run：不讀 key、不連網路）；加上才會真的呼叫，**每個模型各用掉 1 次請求**（快速回 503 觸發自動重試時是 2 次）
+- 模型只能選 `config.toml` 裡有的；沒指定時比較每個 profile 的主要模型
+- 結果寫進 `logs\compare-<時間>-<隨機碼>\`（不會進 git）：每個模型一個 `.md`（Gemini 的輸出，包在不可信標記裡）、`summary.json`（耗時、token 數）和 `run.log`；log 只寫進 `run.log`，不印到終端機
+- key 只從 Credential Manager 讀，不會印出或寫進檔案
+
 ---
 
 ## 疑難排解
@@ -312,7 +336,9 @@ $env:YT_GEMINI_LIVE_TEST = "1"; uv run python -m unittest tests.test_live -v; Re
 | 找不到模型 | `config.toml` 的模型 ID 可能已下架，到 [Gemini 定價頁](https://ai.google.dev/gemini-api/docs/pricing) 查目前的 ID |
 | Claude Desktop 看不到工具 | `command` 改用 uv 的完整路徑，並完全重開 Claude Desktop |
 | 網頁版／手機呼叫時「80 秒內沒有回應」 | 確認 Claude Desktop 設定用的是 `--profile chat`；改過程式或設定後要完全重開 Claude Desktop |
-| Gemini 在 N 秒內沒有回應 | 主要與備援模型都過載，稍後再試；長影片用 `start` / `end` 分段 |
+| Gemini 模型暫時過載（HTTP 503） | Google 那邊這個模型容量不足，約 1 分鐘後再試；server 已經自動重試過 1 次（時間夠的話） |
+| Gemini 處理這支影片超過 Google 端的時間上限（HTTP 504） | 用 `start` / `end` 縮短範圍，保持 `detail="low"` |
+| Gemini 在 N 秒內沒有回應，本機已停止等待 | server 自己的時間上限到了。chat 入口可以再試一次，或改用 Claude Code（code，時間上限較長）；長影片分段 |
 | config.toml 沒有 profile「…」 | `--profile` 的名稱要和 `config.toml` 的 `[profiles.<名稱>]` 一致 |
 | 輸出達到長度上限而被截斷 | 用 `start` / `end` 分段，或調高 `max_output_tokens` |
 
@@ -321,6 +347,8 @@ $env:YT_GEMINI_LIVE_TEST = "1"; uv run python -m unittest tests.test_live -v; Re
 - 只支援 Windows；只支援公開影片，一次分析一支；輸出固定是繁體中文。
 - 主要模型逾時被中止時，Google 那邊可能仍在處理，仍可能計入額度。
 - `gemini-3.5-flash-lite`（Chat 的主要模型、Code 的備援）速度快，但分析深度比 `gemini-3.8-flash` 淺。
+- `gemini-3.8-flash` 是 preview 模型，常常過載（503／504）；這時 code 會改用 flash-lite。
+- chat 沒有備援模型（70 秒內來不及）。偶爾遇到 503 屬於預期，server 會自動重試 1 次；還是失敗就再問一次。
 - 有開發者回報：對 YouTube 網址用 `start`/`end` 時，音訊可能仍以整支影片計算 token。
 
 ## 授權

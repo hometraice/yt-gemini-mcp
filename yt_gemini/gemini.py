@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from google import genai
 from google.genai import errors as genai_errors
@@ -85,14 +85,22 @@ DEFAULT_TASK = MODE_TASKS["summary"]
 
 
 class AnalysisError(Exception):
-    """可以直接顯示給使用者的錯誤。訊息不含 key、不含 stack trace。"""
+    """可以直接顯示給使用者的錯誤。訊息不含 key、不含 stack trace。
+
+    kind 是錯誤分類（overloaded／upstream_deadline／local_timeout／quota…），只給程式判斷用，可能是空字串。
+    """
+
+    def __init__(self, message: str, kind: str = "") -> None:
+        super().__init__(message)
+        self.kind = kind
 
 
 @dataclass(frozen=True)
 class AnalysisResult:
     text: str
     model: str  # 實際產生結果的模型
-    fallback_note: str = ""  # 有用到備援模型時，說明前面的模型為什麼失敗
+    fallback_note: str = ""  # 有重試、跳過或用到備援模型時，說明原因
+    usage: dict[str, int] = field(default_factory=dict)  # token 數（只有數字）
 
 
 def format_timestamp(seconds: int) -> str:
@@ -144,7 +152,11 @@ def _describe_api_error(exc: genai_errors.APIError) -> str:
     message = str(getattr(exc, "message", "") or "")
     lower = message.lower()
     tag = f"（HTTP {code} {status}）".replace(" ）", "）")
+    kind = _error_kind(exc)
 
+    # 503 先判斷：訊息裡剛好有 "quota" 時，也照「過載」說明，和實際的重試行為一致。
+    if kind == "overloaded":
+        return f"Gemini 模型暫時過載{tag}，請約 1 分鐘後再試。"
     if code == 429 or status == "RESOURCE_EXHAUSTED" or "quota" in lower:
         return (
             f"Gemini API 額度已用完或請求太頻繁{tag}。請稍後再試；"
@@ -157,8 +169,14 @@ def _describe_api_error(exc: genai_errors.APIError) -> str:
             f"影片太長，超過模型可處理的長度{tag}。"
             "請用 start / end 只分析其中一段，或保持 detail=\"low\"。"
         )
-    if isinstance(code, int) and code >= 500:  # 要在下面的關鍵字判斷之前：503 訊息常含 "unavailable"
-        return f"Gemini 服務暫時異常或過載{tag}，請稍後再試。"
+    # 5xx 要在下面的關鍵字判斷之前：503 訊息常含 "unavailable"
+    if kind == "upstream_deadline":
+        return (
+            f"Gemini 處理這支影片超過 Google 端的時間上限{tag}。"
+            "請用 start / end 分段分析，並保持 detail=\"low\"；也可以稍後再試。"
+        )
+    if isinstance(code, int) and code >= 500:
+        return f"Gemini 服務暫時異常{tag}，請稍後再試。"
     if any(w in lower for w in ("private", "unlisted", "unavailable", "not available", "cannot be accessed",
                                  "could not be accessed", "failed to fetch", "could not fetch", "video not found")):
         return (
@@ -191,6 +209,26 @@ def _is_retryable(exc: genai_errors.APIError) -> bool:
     return getattr(exc, "code", None) in _RETRYABLE_CODES or status in _RETRYABLE_STATUSES
 
 
+def _error_kind(exc: genai_errors.APIError) -> str:
+    """把 Gemini 回的錯誤分成：overloaded（503 過載）、upstream_deadline（504 Google 端逾時）、其他（空字串）。"""
+    code = _safe_code(exc)
+    status = _safe_status(exc)
+    if code == 503 or (code is None and status == "UNAVAILABLE"):
+        return "overloaded"
+    if code == 504 or (code is None and status == "DEADLINE_EXCEEDED"):
+        return "upstream_deadline"
+    return ""
+
+
+_KIND_LABELS = {"overloaded": "（過載）", "upstream_deadline": "（Google 端處理逾時）"}
+
+# 503 短重試：快速被拒代表當下過載，等一下再試同一個模型常常就好；chat 沒有備援，特別需要。
+# 只重試 1 次、只在剩餘時間夠時重試，避免拖過時間上限或浪費額度。
+_RETRY_FAST_SECONDS = 5.0  # 送出後這麼快就收到 503，才算「快速被拒」
+_RETRY_MIN_REMAINING_SECONDS = 20.0  # 重試前，這個模型至少還要剩這麼多時間
+_RETRY_DELAY_SECONDS = 1.5
+
+
 def _make_client(api_key: str, settings: Settings) -> genai.Client:
     return genai.Client(
         api_key=api_key,
@@ -208,20 +246,34 @@ def _token_count(usage: object, name: str) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
 
-def _log_usage(model: str, response: types.GenerateContentResponse) -> None:
-    """只記 token 數字與模型名稱，不記任何內容。"""
+def _usage_numbers(response: types.GenerateContentResponse) -> dict[str, int]:
+    """從 usage_metadata 取出 token 數；沒有就回傳空 dict。只有數字，沒有內容。"""
     usage = getattr(response, "usage_metadata", None)
     if usage is None:
+        return {}
+    return {
+        "prompt": _token_count(usage, "prompt_token_count"),
+        "output": _token_count(usage, "candidates_token_count"),
+        "thoughts": _token_count(usage, "thoughts_token_count"),
+        "total": _token_count(usage, "total_token_count"),
+    }
+
+
+def _log_usage(model: str, numbers: dict[str, int]) -> None:
+    """只記 token 數字與模型名稱，不記任何內容。"""
+    if not numbers:
         log.info("Gemini usage: model=%s (no usage_metadata)", model)
         return
-    log.info(
-        "Gemini usage: model=%s prompt=%d output=%d thoughts=%d total=%d",
-        model,
-        _token_count(usage, "prompt_token_count"),
-        _token_count(usage, "candidates_token_count"),
-        _token_count(usage, "thoughts_token_count"),
-        _token_count(usage, "total_token_count"),
-    )
+    log.info("Gemini usage: model=%s prompt=%d output=%d thoughts=%d total=%d",
+             model, numbers["prompt"], numbers["output"], numbers["thoughts"], numbers["total"])
+
+
+def _timeout_message(settings: Settings) -> str:
+    """本機等到逾時（不是 Gemini 回的錯誤）。chat 入口建議改用時間上限較長的 Claude Code。"""
+    head = f"Gemini 在 {settings.timeout_seconds} 秒內沒有回應，本機已停止等待。可能是模型過載或影片較長："
+    if settings.profile == "chat":
+        return head + "可以稍後再試、用 start / end 分段，或改在 Claude Code（code 入口，時間上限較長）分析。"
+    return head + "可以稍後再試，或用 start / end 分段分析。"
 
 
 def _is_quota_error(exc: genai_errors.APIError) -> bool:
@@ -313,74 +365,97 @@ async def analyze_video(
     if not models:
         raise AnalysisError(
             f"這個使用入口的模型今日額度都已用完：{'；'.join(skipped)}。"
-            "每日額度在太平洋時間午夜重置。"
+            "每日額度在太平洋時間午夜重置。",
+            "daily_quota",
         )
 
-    timeout_message = (
-        f"Gemini 在 {settings.timeout_seconds} 秒內沒有回應，已中止。"
-        "可能是模型過載，請稍後再試；長影片可以用 start / end 分段分析。"
-    )
+    timeout_message = _timeout_message(settings)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + settings.timeout_seconds
     failures: list[str] = []
     last_message = timeout_message
+    last_kind = "local_timeout"
+    any_retry = False
 
     client = _make_client(api_key, settings)
     try:
         for index, model in enumerate(models):
-            remaining = deadline - loop.time()
-            if remaining < 1:
+            if deadline - loop.time() < 1:
                 break
             is_last = index == len(models) - 1
-            limit = remaining if is_last else min(settings.attempt_timeout_seconds, remaining)
-            try:
-                response = await asyncio.wait_for(
-                    client.aio.models.generate_content(model=model, contents=contents, config=config),
-                    timeout=limit,
-                )
-            except asyncio.TimeoutError:
-                log.warning("Gemini timeout: model=%s after %.0fs", model, limit)
-                failures.append(f"{model} {limit:.0f} 秒內沒有回應")
-                last_message = timeout_message
-                continue
-            except genai_errors.APIError as exc:
-                log.warning("Gemini API error: model=%s code=%s status=%s",
-                            model, _safe_code(exc), _safe_status(exc) or "-")
-                message = _describe_api_error(exc)
-                if not _is_retryable(exc):
-                    raise AnalysisError(message) from None
-                if _is_quota_error(exc):
-                    ids = quota.quota_ids(getattr(exc, "details", None))
-                    # 只記 quotaId（白名單字元），用來確認實際的錯誤格式；不記錯誤訊息內容。
-                    log.warning("Gemini quota: model=%s quota_ids=%s", model, ",".join(ids) or "-")
-                    if quota.is_daily_quota(ids):
-                        reset = quota.format_reset(tracker.mark_exhausted(model))
-                        failures.append(f"{model} 今日額度已用完，{reset} 恢復，在那之前會直接跳過")
-                        last_message = f"Gemini 模型 {model} 今日額度已用完，{reset} 恢復。"
+            # 這個模型最多等到什麼時候；503 短重試也算在裡面，不壓縮後面備援模型的時間。
+            model_deadline = deadline if is_last else min(deadline, loop.time() + settings.attempt_timeout_seconds)
+            retried = False
+            while True:
+                limit = model_deadline - loop.time()
+                started = loop.time()
+                try:
+                    response = await asyncio.wait_for(
+                        client.aio.models.generate_content(model=model, contents=contents, config=config),
+                        timeout=limit,
+                    )
+                except asyncio.TimeoutError:
+                    log.warning("Gemini timeout: model=%s kind=local_timeout after %.0fs", model, limit)
+                    failures.append(f"{model} {limit:.0f} 秒內沒有回應（本機等待逾時）")
+                    last_message, last_kind = timeout_message, "local_timeout"
+                    break
+                except genai_errors.APIError as exc:
+                    elapsed = loop.time() - started
+                    kind = _error_kind(exc)
+                    log.warning("Gemini API error: model=%s code=%s status=%s kind=%s elapsed=%.1fs",
+                                model, _safe_code(exc), _safe_status(exc) or "-", kind or "-", elapsed)
+                    message = _describe_api_error(exc)
+                    if not _is_retryable(exc):
+                        raise AnalysisError(message, kind or "rejected") from None
+                    if (kind == "overloaded" and not retried and elapsed < _RETRY_FAST_SECONDS
+                            and model_deadline - loop.time() - _RETRY_DELAY_SECONDS >= _RETRY_MIN_REMAINING_SECONDS):
+                        retried = any_retry = True
+                        log.info("Gemini retry: model=%s after fast 503 (%.1fs)", model, elapsed)
+                        await asyncio.sleep(_RETRY_DELAY_SECONDS)
                         continue
-                failures.append(f"{model} 回應 HTTP {_safe_code(exc) or '?'}")
-                last_message = message
-                continue
-            except Exception as exc:
-                name = type(exc).__name__
-                log.warning("Unexpected error calling Gemini: model=%s %s", model, name)
-                if "timeout" in name.lower():
-                    failures.append(f"{model} 連線逾時")
-                    last_message = timeout_message
-                    continue
-                raise AnalysisError(f"呼叫 Gemini 時發生未預期的錯誤（{name}）。") from None
+                    if _is_quota_error(exc):
+                        ids = quota.quota_ids(getattr(exc, "details", None))
+                        # 只記 quotaId（白名單字元），用來確認實際的錯誤格式；不記錯誤訊息內容。
+                        log.warning("Gemini quota: model=%s quota_ids=%s", model, ",".join(ids) or "-")
+                        if quota.is_daily_quota(ids):
+                            reset = quota.format_reset(tracker.mark_exhausted(model))
+                            failures.append(f"{model} 今日額度已用完，{reset} 恢復，在那之前會直接跳過")
+                            last_message = f"Gemini 模型 {model} 今日額度已用完，{reset} 恢復。"
+                            last_kind = "daily_quota"
+                            break
+                    after_retry = "，重試 1 次後仍失敗" if retried else ""
+                    label = _KIND_LABELS.get(kind, "")
+                    failures.append(f"{model} 回應 HTTP {_safe_code(exc) or '?'}{label}{after_retry}")
+                    last_message = message
+                    last_kind = kind or ("quota" if _is_quota_error(exc) else "server_error")
+                    break
+                except Exception as exc:
+                    name = type(exc).__name__
+                    log.warning("Unexpected error calling Gemini: model=%s %s", model, name)
+                    if "timeout" in name.lower():
+                        failures.append(f"{model} 連線逾時")
+                        last_message, last_kind = timeout_message, "local_timeout"
+                        break
+                    raise AnalysisError(f"呼叫 Gemini 時發生未預期的錯誤（{name}）。", "unexpected") from None
 
-            _log_usage(model, response)
-            reasons = skipped + failures
-            note = f"{'；'.join(reasons)}，已改用 {model}。" if reasons else ""
-            return AnalysisResult(text=_extract_text(response), model=model, fallback_note=note)
+                usage = _usage_numbers(response)
+                _log_usage(model, usage)
+                parts: list[str] = []
+                reasons = skipped + failures
+                if reasons:
+                    parts.append(f"{'；'.join(reasons)}，已改用 {model}")
+                if retried:
+                    parts.append(f"{model} 第一次回 503（過載），{_RETRY_DELAY_SECONDS:g} 秒後重試 1 次成功")
+                note = "；".join(parts) + "。" if parts else ""
+                return AnalysisResult(text=_extract_text(response), model=model, fallback_note=note, usage=usage)
     finally:
         await _aclose(client)
 
     reasons = skipped + failures
-    if settings.fallback_models and reasons:
-        raise AnalysisError(f"{last_message}（已嘗試：{'；'.join(reasons)}）")
-    raise AnalysisError(last_message)
+    # 有備援或有重試時，列出每一次嘗試的結果，讓使用者知道不是一次就放棄。
+    if reasons and (settings.fallback_models or any_retry):
+        raise AnalysisError(f"{last_message}（已嘗試：{'；'.join(reasons)}）", last_kind)
+    raise AnalysisError(last_message, last_kind)
 
 
 async def _aclose(client: genai.Client) -> None:

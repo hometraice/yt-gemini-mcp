@@ -107,10 +107,10 @@ class TestTool(unittest.TestCase):
         with mock.patch.object(gemini, "analyze_video", side_effect=fake_analyze):
             out = asyncio.run(server.analyze_youtube(url="youtu.be/dQw4w9WgXcQ"))
         self.assertIn("模型：model-b，chat 入口的備援模型", out)
-        self.assertIn("（備援：model-a 回應 HTTP 503，已改用 model-b。）", out)
-        self.assertTrue(out.rstrip().endswith("（備援：model-a 回應 HTTP 503，已改用 model-b。）"))  # 原因在最後一行
+        self.assertIn("（說明：model-a 回應 HTTP 503，已改用 model-b。）", out)
+        self.assertTrue(out.rstrip().endswith("（說明：model-a 回應 HTTP 503，已改用 model-b。）"))  # 原因在最後一行
         # 備援說明在不可信標記之外（這是 server 自己產生的可信資訊）
-        self.assertGreater(out.index("（備援"), out.index("</untrusted_video_analysis"))
+        self.assertGreater(out.index("（說明："), out.index("</untrusted_video_analysis"))
 
     def test_mode_is_validated_and_passed_through(self):
         captured = {}

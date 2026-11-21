@@ -7,6 +7,9 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-21 | SPEC.md | v6.0 | 新增 503 短重試（5 秒內回 503、剩餘時間至少 20 秒時，對同一模型等 1.5 秒再試 1 次）；錯誤分類（503 過載／504 Google 端逾時／本機逾時）與對應建議；交付內容加上 opt-in 的 `tools/compare_models.py` | 實測 chat（沒有備援）一次 503 就整個失敗，flash-lite 3 次中 1 次回 503；原本所有 5xx 都同一句話，使用者不知道該重試、分段還是換入口 |
+| 2026-11-21 | README.md | v4.1 | 新增「Choosing a profile」白話對照表；回覆最後一行的重試說明與錯誤類型表；模型對照工具；Limitations 補上 3.8-flash 是 preview、chat 沒有備援 | 配合 SPEC v6.0 |
+| 2026-11-21 | README.zh-TW.md | v4.1 | 同上：怎麼選 profile、重試與錯誤分類、模型對照工具、疑難排解與已知限制 | 配合 SPEC v6.0 |
 | 2026-11-21 | README.md | v4.0 | 改成英文主文件：git clone 安裝、需求、設定、模式、回覆最後一行怎麼看、free tier、開發、限制、授權 | 公開到 GitHub，讓其他人用自己的 key 安裝 |
 | 2026-11-21 | README.zh-TW.md | v4.0 | 新增繁中版（由 README v3.1 改寫）：git clone 安裝、移除本機路徑、加上授權與回報漏洞方式 | 同上 |
 | 2026-11-21 | SPEC.md | v5.1 | 專案位置改成通用說明；交付內容加上公開文件，開發筆記改放本機 `notes/` | 公開前移除個人路徑 |

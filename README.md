@@ -1,4 +1,4 @@
-> Version: v4.0 | 2026-11-21 | Public release: English README, git clone install, license and security policy
+> Version: v4.1 | 2026-11-21 | Choosing a profile, 503 retry and error types, compare tool, limitations of preview models
 
 # yt-gemini-mcp
 
@@ -24,7 +24,7 @@ A local MCP server that lets Claude (Claude Code / Claude Desktop) "watch" publi
 | SSRF / abuse | Only `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `m.youtube.com/watch?v=` are accepted; exact host allowlist; 11-character video ID; the URL sent to Gemini is always rebuilt as `https://www.youtube.com/watch?v=<ID>` |
 | Prompt injection | The Gemini system instruction says instructions inside the video must only be reported, never followed. Results are wrapped in `<untrusted_video_analysis>` tags whose opening and closing tags carry a per-call random id, so video content cannot forge the closing tag; tag-like text in the content (including full-width and invisible characters) is neutralized. Tutorial mode adds a "review before running" notice. Raw upstream error text is never returned to Claude |
 | Supply chain | Only three direct dependencies (`mcp`, `google-genai`, `keyring`), pinned with `==`, locked with hashes in `uv.lock`, started with `--locked`; `exclude-newer` avoids freshly published releases |
-| Quota / resources | Total time budget per call (70 s for chat, 240 s for code, including fallback); SDK auto-retry disabled in favour of a bounded model fallback (max 3); models whose daily quota is exhausted are skipped until reset; call limits (2 concurrent, 5 per minute, 100 per 24 h — excess calls are rejected); low media resolution by default; token usage logged (numbers only) |
+| Quota / resources | Total time budget per call (70 s for chat, 240 s for code, including fallback); SDK auto-retry disabled in favour of a bounded model fallback (max 3) and at most one short retry per model on a fast 503; models whose daily quota is exhausted are skipped until reset; call limits (2 concurrent, 5 per minute, 100 per 24 h — excess calls are rejected); low media resolution by default; token usage logged (numbers only) |
 
 Found a vulnerability? Please report it privately as described in [SECURITY.md](SECURITY.md) — do not open a public issue.
 
@@ -84,6 +84,17 @@ You should see `[OK]` for every model used in `config.toml`. `--check` only fetc
 - Delete the key: `uv run set_key.py --delete`
 
 **Recommended on the Google side:** restrict the key to the `Generative Language API` in [Google Cloud Console → Credentials](https://console.cloud.google.com/apis/credentials). If you suspect a leak, delete the key in [AI Studio](https://aistudio.google.com/apikey), create a new one, and run `set_key.py` again.
+
+## Choosing a profile
+
+You register the server once per Claude app and pick a **profile** for it. In plain terms:
+
+| You use… | Profile | What you get |
+|---|---|---|
+| Claude Desktop chat, claude.ai on the web, or the mobile app (through Claude Desktop) | `chat` | Fast answers (usually 5–20 s) from `gemini-3.5-flash-lite`. These apps give up after about 80 s, so `chat` always finishes within 70 s |
+| Claude Code (terminal, Code tab, Remote Control) | `code` | Deeper analysis from `gemini-3.8-flash` (often 1–3 minutes), with `flash-lite` as fallback. Best for long videos, tutorials and detailed notes |
+
+Rule of thumb: quick questions anywhere → `chat`; "I want everything in this video and can wait" → `code` in Claude Code.
 
 ## Register with Claude Code
 
@@ -166,6 +177,15 @@ The footer (outside the untrusted tags) tells you which model answered and why, 
 
 - **Primary model of the chat profile** — expected: chat uses the fast `flash-lite` because of the ~80 s limit. Use Claude Code for deeper analysis.
 - **Fallback model** — the primary model failed; the next line gives the reason (timeout, HTTP code, or daily quota exhausted).
+- **Retried once** — Gemini answered `503` (overloaded) within a few seconds, so the server waited 1.5 s and tried the same model once more. It only does this when enough time is left, at most once per model.
+
+When a call fails, the message says which kind of failure it was:
+
+| Message | Meaning | What to do |
+|---|---|---|
+| Model temporarily overloaded (HTTP 503) | Google is short on capacity for this model | Try again in about a minute |
+| Exceeded Google's time limit (HTTP 504) | Gemini took too long on Google's side | Analyze a shorter range with `start`/`end`; keep `detail="low"` |
+| No response within N seconds; stopped waiting | The server's own time budget ran out | In `chat`, try again or switch to Claude Code (`code`, longer budget); split long videos |
 - `yt-gemini-mcp v…` is the version currently loaded; if you still see an old version after updating, fully restart Claude Desktop.
 
 ### Tips
@@ -185,7 +205,7 @@ Each entry point (profile) has its own models and limits; pick one with `--profi
 | `chat` | `gemini-3.5-flash-lite` | none | `low` | 70 s / 35 s |
 | `code` | `gemini-3.8-flash` | `gemini-3.5-flash-lite` | `medium` | 240 s / 150 s |
 
-- `model`, `fallback_models` — fallback is used on timeout, overload (5xx) or quota (429); max 3
+- `model`, `fallback_models` — fallback is used on timeout, overload (5xx) or quota (429); max 3. Before falling back, a fast `503` gets one short retry on the same model (within that model's wait time)
 - `thinking_level` — `low` / `medium` / `high`
 - `timeout_seconds`, `attempt_timeout_seconds` — total budget and how long to wait for the primary model
 - `[gemini] max_output_tokens` — response length cap (default 16384)
@@ -217,11 +237,22 @@ Unit tests use mocks only — no network, no key. A live test (uses your key and
 $env:YT_GEMINI_LIVE_TEST = "1"; uv run python -m unittest tests.test_live -v; Remove-Item Env:YT_GEMINI_LIVE_TEST
 ```
 
+### Comparing two models (opt-in, uses quota)
+
+`tools/compare_models.py` runs the same video and mode once on each of up to two models and records the time taken and token counts, to help you decide which model a profile should use:
+
+```powershell
+uv run tools/compare_models.py "https://youtu.be/<id>" --mode summary --start 0 --end 300
+```
+
+Without `--yes-use-quota` it only prints what it would do (dry run: no key read, no network). Add `--yes-use-quota` to actually call Gemini — **each model uses one request of your quota** (two if a fast `503` triggers the automatic retry). Only models listed in `config.toml` are accepted; by default it compares each profile's primary model. Results go to `logs\compare-<timestamp>-<random>\` (git-ignored): one `.md` per model with Gemini's output wrapped in untrusted tags, a `summary.json` with timings and token counts, and `run.log`. Logs are written only to `run.log`, never to the terminal. The key is read from Credential Manager and never printed or written.
+
 Project layout:
 
 ```
 server.py        MCP server entry point (the only tool: analyze_youtube)
 set_key.py       store / check / delete the API key
+tools/           opt-in developer tools (compare_models.py)
 config.toml      non-secret settings: profiles, models, time budgets, call limits
 yt_gemini/       internal modules (config, keystore, redaction, validation, gemini, quota, ratelimit, untrusted)
 tests/           unit tests and the opt-in live test
@@ -237,6 +268,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - Windows only (the key store is pinned to Windows Credential Manager on purpose)
 - Output language is Traditional Chinese (set in the system instruction in `yt_gemini/gemini.py`)
 - Public videos only, one video per call
+- `gemini-3.8-flash` is a preview model and is often overloaded (503/504); `code` falls back to `flash-lite` when that happens
+- The `chat` profile has no fallback model (there is no time for one within 70 s). An occasional `503` is expected; the server retries once automatically, and if it still fails, just ask again
 - A timed-out request may still be processed (and counted) on Google's side
 - Developers have reported that with `start`/`end` on YouTube URLs, audio may still be billed for the whole video
 

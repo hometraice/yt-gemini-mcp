@@ -1,4 +1,4 @@
-> Version: v5.1 | 2026-11-21 | 公開版：專案位置改成通用說明、交付內容加上授權與公開文件
+> Version: v6.0 | 2026-11-21 | 快速回應的 503 對同一模型短重試一次；錯誤分類（503／504／本機逾時）；新增 opt-in 模型對照工具
 
 # yt-gemini-mcp 開發規格
 
@@ -14,7 +14,7 @@
 | Gemini API key | 寫進程式碼、設定檔、log、對話或 commit 而外洩；被盜用後耗盡額度或產生費用 | 只存在 Credential Manager；`getpass` 隱藏輸入；log 與錯誤訊息遮罩；`config.toml` 出現疑似 key 就拒絕啟動；`.gitignore` 加 gitleaks 掃描；Google 端把 key 限制只能用 Generative Language API、不綁 billing |
 | 本機與內網 | 惡意網址讓 server 代為連線到其他網站或內網（SSRF） | host 白名單完全比對、驗證 11 碼 ID、一律重組成標準網址；server 沒有任意 HTTP request 的能力 |
 | Claude 的行為 | 影片裡夾帶指令，誘導 Claude 執行動作（prompt injection）；教學影片裡的惡意指令被照著執行 | Gemini system instruction 要求只轉述；結果包在帶隨機 id 的 `<untrusted_video_analysis>` 裡，並中和偽造的標記（含全形與看不見的字元）；tutorial 模式在結尾加「執行前必須人工審查」；只有一個唯讀工具 |
-| Gemini 額度 | 濫用、長影片或自動重試把 free tier 額度用完 | 總時間上限、關閉 SDK 自動重試、備援最多 3 個模型、預設低解析度、`question` 與秒數設上限；每日額度用完的模型當天直接跳過；token 用量寫進 log 方便追蹤；呼叫上限（同時進行數、每分鐘、每 24 小時），超過就拒絕 |
+| Gemini 額度 | 濫用、長影片或自動重試把 free tier 額度用完 | 總時間上限、關閉 SDK 自動重試（只保留自己控制的 503 短重試，每個模型最多 1 次；最壞情況一次工具呼叫的請求數＝模型數×2，上限 (1+3)×2＝8，目前設定 chat 2、code 4）、備援最多 3 個模型、預設低解析度、`question` 與秒數設上限；每日額度用完的模型當天直接跳過；token 用量寫進 log 方便追蹤；呼叫上限（同時進行數、每分鐘、每 24 小時），超過就拒絕 |
 | 執行環境 | 惡意或被竄改的套件（供應鏈攻擊） | 只用三個官方套件、版本用 `==` 固定、`uv.lock` 記 hash、`exclude-newer` 避開剛發布的版本、定期 `pip-audit` |
 | 使用者的問題內容 | free tier 的資料可能被 Google 用來改進產品 | `question` 不放機密資訊（README 已註明） |
 
@@ -78,6 +78,21 @@
   - `thinking_level` 只接受 `low`、`medium`、`high`；同一個 profile 的模型共用同一個值。不開放 `minimal`：`gemini-3.8-flash` 不支援，送出會錯誤
 - 不設定 `temperature`：官方文件說 Gemini 3.6 Flash、3.5 Flash-Lite 已棄用 temperature（API 會忽略，之後的模型會回錯誤），3.8 的遷移清單也要求移除。`config.toml` 裡還有 `temperature` 時拒絕啟動，並提示移除
 - 主要模型逾時、過載（5xx）或額度用完（429）時，依序改用備援模型；關閉 SDK 的自動重試，避免拖過時間上限或浪費額度
+- **503 短重試**（chat 沒有備援，一次 503 就整個失敗；實測 flash-lite 3 次中 1 次回 503）：以下條件全部成立時，等 1.5 秒後對**同一個模型**再試一次
+  - 錯誤是 HTTP 503 或 status `UNAVAILABLE`
+  - 從送出到收到錯誤不到 5 秒（快速被拒，代表當下過載，而不是處理到一半）
+  - 這個模型剩下的等待時間（`attempt_timeout_seconds`，最後一個模型用總時間）至少 20 秒
+  - 每個模型最多重試 1 次；重試算在該模型原本的等待時間內，不壓縮備援模型的時間，也不超過 `timeout_seconds`
+  - 429、504、本機逾時、超過 5 秒才回的 503 都不重試
+  - 結果最後一行註明重試的情況（例如「重試 1 次後成功」）
+  - 官方沒有說明失敗的請求是否計入每日額度，所以次數壓在最少
+- **錯誤分類**：回給使用者的訊息與 log 區分三種情況，並給對應建議；不帶上游原文、不帶 key
+  | 情況 | 說明 | 建議 |
+  |---|---|---|
+  | Gemini 回 503（`UNAVAILABLE`） | 模型暫時過載 | 約 1 分鐘後再試 |
+  | Gemini 回 504（`DEADLINE_EXCEEDED`） | Google 端處理超過它的時間上限 | 用 `start`／`end` 分段、保持 `detail="low"` |
+  | 本機等到逾時 | server 等了 N 秒沒有結果 | chat 入口建議改用 Claude Code（code，最多 240 秒）或分段；code 入口建議分段或稍後再試 |
+  - log 記 `kind=overloaded|upstream_deadline|local_timeout`、模型、耗時秒數
 - **每日額度用完時當天跳過該模型**：
   - 收到 429，而且錯誤細節明確指出是「每日」額度（`google.rpc.QuotaFailure` 的 `quotaId` 含 `PerDay`），就在 server 記憶體裡記下這個模型；在下一次每日重置之前，後續呼叫直接跳過它，不再白等或浪費請求
   - 重置時間一律算到 UTC 08:00，也就是太平洋標準時間午夜、台灣時間 16:00。夏令時間期間 Google 實際在 UTC 07:00 重置，所以最多會多跳過 1 小時；這樣就不必新增 `tzdata` 套件（Windows 的 Python 沒有內建時區資料）
@@ -162,6 +177,12 @@ Gemini 輸出要求：
 ## 交付內容
 - `server.py`、`set_key.py`、`config.toml`、`pyproject.toml`、`uv.lock`
 - `set_key.py --check`：確認 key 存在，並對 `config.toml` 所有 profile 用到的每個模型做不耗生成額度的查詢
+- `tools/compare_models.py`（開發用，opt-in）：同一支影片、同一個 mode，對最多兩個模型各跑一次，比較耗時、token 數與結果
+  - 預設 dry-run，只印出會做什麼；加 `--yes-use-quota` 才會呼叫 Gemini（會消耗額度）
+  - 模型只能選 `config.toml` 裡出現過的；網址、mode、秒數用 server 同一套驗證；每個模型不使用備援
+  - 結果寫進 `logs/compare-<時間>-<隨機碼>/`（`logs/` 在 `.gitignore` 裡）：每個模型一個 `.md`（遮罩後包進帶隨機 id 的不可信標記）、一份 `summary.json`（只有耗時、token 數、成功與否、錯誤分類）、`run.log`
+  - 執行 log 只寫進 `run.log`，不印到終端機（上游錯誤原文不可進入 Claude 的對話）；終端機只印統計數字
+  - key 只從 keyring 讀，不印出；不受 server 的呼叫上限管制，所以每次執行最多 2 個模型、各 1 次（加上 503 短重試）
 - 公開文件：`README.md`（英文）、`README.zh-TW.md`、`LICENSE`（MIT）、`SECURITY.md`、`CONTRIBUTING.md`；開發筆記（進度、交接）只留在本機的 `notes/`，不公開
 - `README.md`：安裝步驟、存 key、註冊到 Claude Desktop（`claude_desktop_config.json`）與 Claude Code（`claude mcp add`）的方法、測試方式
 - 測試：

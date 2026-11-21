@@ -43,18 +43,24 @@ class FakeBackend:
 
 
 class FakeModels:
-    """behavior[model] 可以是回應物件、例外，或 ("sleep", 秒數)。"""
+    """behavior[model] 可以是回應物件、例外、("sleep", 秒數)、("sleep_raise", 秒數, 例外)，
+    或上述項目組成的 list（依呼叫順序逐一使用）。"""
 
     def __init__(self, behavior):
-        self.behavior = behavior
+        self.behavior = {k: list(v) if isinstance(v, list) else v for k, v in behavior.items()}
         self.calls = []
 
     async def generate_content(self, **kwargs):
         self.calls.append(kwargs)
         action = self.behavior[kwargs["model"]]
+        if isinstance(action, list):
+            action = action.pop(0)
         if isinstance(action, tuple) and action[0] == "sleep":
             await asyncio.sleep(action[1])
             return text_response("太慢了")
+        if isinstance(action, tuple) and action[0] == "sleep_raise":
+            await asyncio.sleep(action[1])
+            raise action[2]
         if isinstance(action, BaseException):
             raise action
         return action
@@ -114,6 +120,7 @@ def run(behavior, settings=SETTINGS, tracker=None, **overrides):
     tracker = tracker or quota.DailyQuotaTracker(FakeClock(NOON_TW))
     with mock.patch.object(keystore, "_backend", return_value=FakeBackend(FAKE_KEY)), \
          mock.patch.object(quota, "tracker", tracker), \
+         mock.patch.object(gemini, "_RETRY_DELAY_SECONDS", 0), \
          mock.patch.object(gemini, "_make_client", return_value=client) as make_client:
         result = asyncio.run(gemini.analyze_video(VIDEO, **params))
     return result, models, client, make_client
@@ -226,7 +233,7 @@ class TestFallback(unittest.TestCase):
             run({PRIMARY: api_error(503, "UNAVAILABLE", "x"), BACKUP: api_error(503, "UNAVAILABLE", "y")},
                 settings=SETTINGS_FALLBACK)
         message = str(ctx.exception)
-        self.assertIn("暫時異常", message)
+        self.assertIn("過載", message)
         self.assertIn(PRIMARY, message)
         self.assertIn(BACKUP, message)
 
@@ -286,8 +293,27 @@ class TestErrors(unittest.TestCase):
         self.assertFalse(any("INJECT" in line for line in logs.output))
 
     def test_server_overloaded(self):
-        self.assert_error(api_error(503, "UNAVAILABLE", "The model is overloaded. Service unavailable."),
-                          "暫時異常")
+        message = self.assert_error(api_error(503, "UNAVAILABLE", "The model is overloaded. Service unavailable."),
+                                    "過載", "1 分鐘")
+        self.assertNotIn("Service unavailable", message)  # 不帶上游原文
+
+    def test_upstream_deadline(self):
+        message = self.assert_error(api_error(504, "DEADLINE_EXCEEDED", "Deadline expired before operation"),
+                                    "Google 端的時間上限", "start / end")
+        self.assertNotIn("Deadline expired", message)
+
+    def test_other_server_error(self):
+        self.assert_error(api_error(500, "INTERNAL", "boom"), "暫時異常", "HTTP 500")
+
+    def test_timeout_message_depends_on_profile(self):
+        for profile, expected in (("chat", "Claude Code"), ("code", "分段")):
+            with self.subTest(profile=profile):
+                settings = Settings(model=PRIMARY, timeout_seconds=1, max_output_tokens=1024, profile=profile)
+                with self.assertRaises(gemini.AnalysisError) as ctx:
+                    run({PRIMARY: ("sleep", 5)}, settings=settings)
+                self.assertIn("本機已停止等待", str(ctx.exception))
+                self.assertIn(expected, str(ctx.exception))
+                self.assertEqual(ctx.exception.kind, "local_timeout")
 
     def test_model_not_found(self):
         self.assert_error(api_error(404, "NOT_FOUND", "models/model-primary is not found"), "config.toml")
@@ -441,6 +467,96 @@ class TestUsageLog(unittest.TestCase):
             result, _, _, _ = run({PRIMARY: text_response("ok")})
         self.assertEqual(result.text, "ok")
         self.assertTrue(any("no usage_metadata" in line or "prompt=0" in line for line in logs.output))
+
+
+OVERLOADED = api_error(503, "UNAVAILABLE", "The model is overloaded.")
+SETTINGS_ROOMY = Settings(model=PRIMARY, timeout_seconds=30, max_output_tokens=1024, profile="chat")
+SETTINGS_ROOMY_FALLBACK = Settings(model=PRIMARY, timeout_seconds=60, max_output_tokens=1024,
+                                   fallback_models=(BACKUP,), attempt_timeout_seconds=25, profile="code")
+
+
+class TestTransientRetry(unittest.TestCase):
+    def test_fast_503_is_retried_once_and_succeeds(self):
+        result, models, _, _ = run({PRIMARY: [OVERLOADED, text_response("第二次成功")]}, settings=SETTINGS_ROOMY)
+        self.assertEqual(result.text, "第二次成功")
+        self.assertEqual(result.model, PRIMARY)
+        self.assertEqual([c["model"] for c in models.calls], [PRIMARY, PRIMARY])
+        self.assertIn("重試 1 次成功", result.fallback_note)
+
+    def test_retry_still_failing_reports_both_attempts(self):
+        with self.assertRaises(gemini.AnalysisError) as ctx:
+            run({PRIMARY: [OVERLOADED, OVERLOADED, text_response("不該有第三次")]}, settings=SETTINGS_ROOMY)
+        message = str(ctx.exception)
+        self.assertIn("過載", message)
+        self.assertIn("重試 1 次後仍失敗", message)
+        self.assertEqual(ctx.exception.kind, "overloaded")
+
+    def _calls(self, behavior, settings):
+        models = FakeModels(behavior)
+        client = FakeClient(models)
+        with mock.patch.object(keystore, "_backend", return_value=FakeBackend(FAKE_KEY)), \
+             mock.patch.object(quota, "tracker", quota.DailyQuotaTracker(FakeClock(NOON_TW))), \
+             mock.patch.object(gemini, "_RETRY_DELAY_SECONDS", 0), \
+             mock.patch.object(gemini, "_make_client", return_value=client):
+            with self.assertRaises(gemini.AnalysisError):
+                asyncio.run(gemini.analyze_video(VIDEO, question=None, start=None, end=None,
+                                                 detail="low", settings=settings))
+        return len(models.calls)
+
+    def test_at_most_one_retry_per_model(self):
+        self.assertEqual(self._calls({PRIMARY: [OVERLOADED] * 5}, SETTINGS_ROOMY), 2)
+
+    def test_no_retry_when_budget_is_short(self):
+        settings = Settings(model=PRIMARY, timeout_seconds=10, max_output_tokens=1024)  # 10 秒 < 20 秒門檻
+        self.assertEqual(self._calls({PRIMARY: [OVERLOADED, text_response("不該被呼叫")]}, settings), 1)
+
+    def test_slow_503_is_not_retried(self):
+        with mock.patch.object(gemini, "_RETRY_FAST_SECONDS", 0.05):
+            with self.assertRaises(gemini.AnalysisError) as ctx:
+                run({PRIMARY: [("sleep_raise", 0.2, OVERLOADED), text_response("不該被呼叫")]},
+                    settings=SETTINGS_ROOMY)
+        self.assertNotIn("重試", str(ctx.exception))
+
+    def test_429_is_not_retried(self):
+        with self.assertRaises(gemini.AnalysisError) as ctx:
+            run({PRIMARY: [quota_error(PER_MINUTE), text_response("不該被呼叫")]}, settings=SETTINGS_ROOMY)
+        self.assertIn("429", str(ctx.exception))
+        self.assertNotIn("重試", str(ctx.exception))
+
+    def test_504_is_not_retried(self):
+        with self.assertRaises(gemini.AnalysisError) as ctx:
+            run({PRIMARY: [api_error(504, "DEADLINE_EXCEEDED", "x"), text_response("不該被呼叫")]},
+                settings=SETTINGS_ROOMY)
+        self.assertEqual(ctx.exception.kind, "upstream_deadline")
+        self.assertNotIn("重試", str(ctx.exception))
+
+    def test_non_retryable_error_is_not_retried(self):
+        settings = SETTINGS_ROOMY
+        self.assertEqual(self._calls({PRIMARY: [api_error(400, "INVALID_ARGUMENT", "The YouTube video is private."),
+                                                text_response("不該被呼叫")]}, settings), 1)
+
+    def test_retry_failure_then_fallback(self):
+        result, models, _, _ = run({PRIMARY: [OVERLOADED, OVERLOADED], BACKUP: text_response("備援結果")},
+                                   settings=SETTINGS_ROOMY_FALLBACK)
+        self.assertEqual(result.model, BACKUP)
+        self.assertEqual([c["model"] for c in models.calls], [PRIMARY, PRIMARY, BACKUP])
+        self.assertIn("重試 1 次後仍失敗", result.fallback_note)
+        self.assertIn(f"已改用 {BACKUP}", result.fallback_note)
+
+    def test_retry_log_has_kind_and_no_upstream_text(self):
+        with self.assertLogs("yt_gemini.gemini", level="INFO") as logs:
+            run({PRIMARY: [OVERLOADED, text_response("ok")]}, settings=SETTINGS_ROOMY)
+        joined = "\n".join(logs.output)
+        self.assertIn("kind=overloaded", joined)
+        self.assertIn("Gemini retry", joined)
+        self.assertNotIn("The model is overloaded", joined)
+
+    def test_usage_numbers_are_returned(self):
+        response = text_response("ok")
+        response.usage_metadata = types.GenerateContentResponseUsageMetadata(
+            prompt_token_count=10, candidates_token_count=5, thoughts_token_count=2, total_token_count=17)
+        result, _, _, _ = run({PRIMARY: response})
+        self.assertEqual(result.usage, {"prompt": 10, "output": 5, "thoughts": 2, "total": 17})
 
 
 class TestHelpers(unittest.TestCase):
