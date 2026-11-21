@@ -7,6 +7,9 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-22 | SPEC.md | v10.1 | 更正例子：Chat 與 Code 分頁實測都會跳出轉錄稿按鈕，「沒有按鈕」不再舉 Chat 為例 | 使用者實測 v0.8.1，Chat 也有按鈕；行為不變 |
+| 2026-11-22 | README.md | v8.1 | 同上 | 同上 |
+| 2026-11-22 | README.zh-TW.md | v8.1 | 同上 | 同上 |
 | 2026-11-22 | SPEC.md | v10.0 | 轉錄稿詢問：Claude 有可點選的選項工具時才用按鈕問；沒有就不用文字問，直接帶 `skip_transcript=true` 分析，結尾附提示 | 使用者實測 v9.0 在 Chat 被用文字問、要打字回答，太不方便；希望有按鈕才問、沒有就直接分析 |
 | 2026-11-22 | README.md | v8.0 | 轉錄稿段落改成：有按鈕才問，沒有就直接分析並附提示 | 配合 SPEC v10.0 |
 | 2026-11-22 | README.zh-TW.md | v8.0 | 同上 | 配合 SPEC v10.0 |

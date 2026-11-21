@@ -1,4 +1,4 @@
-> Version: v10.0 | 2026-11-22 | 轉錄稿詢問：有可點選的按鈕才問，沒有就不用文字問、直接分析
+> Version: v10.1 | 2026-11-22 | 更正例子：Claude Desktop 的 Chat 與 Code 分頁實測都有轉錄稿按鈕
 
 # yt-gemini-mcp 開發規格
 
@@ -164,8 +164,8 @@ MCP tool：`analyze_youtube`
 
 **轉錄稿的詢問流程**（由 server 強制；v8.0 以前只寫在說明裡，Claude 常常不問）：
 - `config.toml` 的 `[gemini] ask_for_transcript`（布林值，預設 `true`）開啟時：一支影片第一次被分析、沒有 `transcript`、也沒有 `skip_transcript=true`，server **不呼叫 Gemini**，直接回一段給 Claude 的說明（英文）：
-  - **Claude 有可點選的選項工具（例如 Claude Code 的選項按鈕）時**：用按鈕詢問「貼上轉錄稿」或「直接分析」；選貼上就附取得步驟（開啟影片頁面 →「顯示完整資訊」→「顯示轉錄稿」→ 全選複製 → 貼回對話）
-  - **沒有按鈕時（例如 Chat）**：不用文字問，立刻帶 `skip_transcript=true` 重新呼叫，結果結尾會有可附轉錄稿的提示
+  - **Claude 有可點選的選項工具時**（2026-11-22 實測：Claude Desktop 的 Chat 與 Code 分頁都會跳出按鈕）：用按鈕詢問「貼上轉錄稿」或「直接分析」；選貼上就附取得步驟（開啟影片頁面 →「顯示完整資訊」→「顯示轉錄稿」→ 全選複製 → 貼回對話）
+  - **沒有按鈕的入口**：不用文字問，立刻帶 `skip_transcript=true` 重新呼叫，結果結尾會有可附轉錄稿的提示
   - 原因：使用者希望能用點的回答；用文字問要打字，太不方便（v9.0 實測）
   - server 無法得知 Claude 有沒有按鈕可用，所以這個判斷交給 Claude
 - 防止卡住：每個 server process 對同一支影片只攔一次，第二次呼叫一定照常分析；記錄只在記憶體、最多 500 支影片（超過就丟掉最舊的）
