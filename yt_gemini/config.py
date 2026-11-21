@@ -43,6 +43,7 @@ class Settings:
     max_concurrent: int = 2
     max_calls_per_minute: int = 5
     max_calls_per_day: int = 100
+    ask_for_transcript: bool = True  # 沒附轉錄稿時，每支影片第一次先請 Claude 詢問使用者
     language: str = "zh-TW"  # 輸出語言（[gemini] output_language）：Gemini 的回答與 server 回給 Claude 的訊息
 
 
@@ -166,6 +167,10 @@ def load_settings(path: Path = CONFIG_PATH, profile: str = DEFAULT_PROFILE) -> S
     if language not in OUTPUT_LANGUAGES:
         raise ConfigError(f"config.toml：output_language 只能是 {'、'.join(OUTPUT_LANGUAGES)}。")
 
+    ask_for_transcript = gemini.get("ask_for_transcript", True)
+    if not isinstance(ask_for_transcript, bool):
+        raise ConfigError("config.toml：ask_for_transcript 只能是 true 或 false。")
+
     # 沒有 [limits] 也一定套用預設上限（fail closed：設定漏了不代表不限制）。
     limits = data.get("limits", {})
     if not isinstance(limits, dict):
@@ -183,4 +188,5 @@ def load_settings(path: Path = CONFIG_PATH, profile: str = DEFAULT_PROFILE) -> S
         attempt_timeout_seconds=attempt,
         thinking_level=thinking,
         language=language,
+        ask_for_transcript=ask_for_transcript,
     )

@@ -127,9 +127,10 @@ class TestTranscriptInRequest(unittest.TestCase):
 
 class TestServerTranscript(unittest.TestCase):
     def setUp(self):
-        patcher = mock.patch.object(ratelimit, "limiter", ratelimit.CallLimiter())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(ratelimit, "limiter", ratelimit.CallLimiter()),
+                        mock.patch.object(server, "_should_ask_for_transcript", return_value=False)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def call(self, **kwargs):
         captured = {}

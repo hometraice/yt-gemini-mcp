@@ -21,7 +21,7 @@ class TestSurface(unittest.TestCase):
         self.assertTrue(tool.annotations.read_only_hint)
         self.assertFalse(tool.annotations.idempotent_hint)  # 每次呼叫都消耗額度
         self.assertEqual(set(tool.input_schema["properties"]),
-                         {"url", "mode", "question", "start", "end", "detail", "transcript"})
+                         {"url", "mode", "question", "start", "end", "detail", "transcript", "skip_transcript"})
         self.assertEqual(tool.input_schema["required"], ["url"])
         self.assertEqual(set(tool.input_schema["properties"]["mode"]["enum"]), set(gemini.MODES))
 
@@ -44,9 +44,10 @@ class TestSurface(unittest.TestCase):
 class TestTool(unittest.TestCase):
     def setUp(self):
         # 每個測試用新的呼叫上限計數，避免測試之間互相影響。
-        patcher = mock.patch.object(ratelimit, "limiter", ratelimit.CallLimiter())
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        for patcher in (mock.patch.object(ratelimit, "limiter", ratelimit.CallLimiter()),
+                        mock.patch.object(server, "_should_ask_for_transcript", return_value=False)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def test_call_limit_rejects_without_calling_gemini(self):
         async def fake_analyze(video, **kwargs):

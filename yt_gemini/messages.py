@@ -195,6 +195,10 @@ MESSAGES: dict[str, tuple[str, str]] = {
         "a person must review them and check the official docs before running anything.)",
     ),
     "footer_note": ("（說明：{note}）", "(Note: {note})"),
+    "transcript_hint": (
+        "（提示：附上 YouTube 轉錄稿可以讓人名拼法與原話引用更準確。）",
+        "(Tip: adding the YouTube transcript makes names and quotes more accurate.)",
+    ),
 
     # ---- 不可信標記前的說明 ----
     "untrusted_notice": (

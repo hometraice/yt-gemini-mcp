@@ -7,6 +7,10 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-22 | SPEC.md | v9.0 | 轉錄稿詢問改由 server 強制：每支影片第一次沒附轉錄稿時不呼叫 Gemini，回固定說明請 Claude 詢問使用者；新增 `skip_transcript` 參數與 `ask_for_transcript` 設定；同一支影片只攔一次、記錄上限 500 支；沒附轉錄稿時結尾加提示；要求 Claude 原樣附上結尾的模型與版本 | 只寫在說明裡時 Claude 常常不問（使用者在新 session 實際遇到）；Claude 重寫回覆時會省略版本行，使用者看不到用的是哪一版 |
+| 2026-11-22 | config.toml | v6.0 | 新增 `[gemini] ask_for_transcript = true` | 配合 SPEC v9.0 |
+| 2026-11-22 | README.md | v7.0 | 轉錄稿段落改成 server 會先問；`skip_transcript` 參數；`ask_for_transcript` 設定；結尾版本行看不到時展開工具呼叫 | 配合 SPEC v9.0 |
+| 2026-11-22 | README.zh-TW.md | v7.0 | 同上 | 配合 SPEC v9.0 |
 | 2026-11-22 | SPEC.md | v8.0 | 輸出語言可設定（`output_language`：zh-TW／en），Gemini 回答與 server 回給 Claude 的訊息都切換；給 Claude 讀的工具說明、參數說明、server instructions 改英文；key 儲存支援 macOS Keychain（實驗性），依平台固定後端，其他平台拒絕；CI 加 macOS | 讓國際使用者不用改程式就能使用；英文是 MCP 生態的共通語言；涵蓋使用 Claude Code 的 Mac 使用者 |
 | 2026-11-22 | config.toml | v5.0 | 新增 `[gemini] output_language = "zh-TW"`；註解補上 macOS Keychain | 配合 SPEC v8.0 |
 | 2026-11-22 | README.md | v6.0 | 輸出語言設定；macOS 安裝（Homebrew）、Claude Desktop 路徑、Keychain 允許提示；Limitations 改成 macOS 實驗性、Linux 不支援、config 錯誤訊息為中文 | 配合 SPEC v8.0 |

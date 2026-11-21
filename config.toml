@@ -1,4 +1,4 @@
-# Version: v5.0 | 2026-11-22 | 新增 output_language（zh-TW／en）
+# Version: v6.0 | 2026-11-22 | 新增 ask_for_transcript
 #
 # yt-gemini-mcp 設定檔
 #
@@ -12,6 +12,10 @@
 # 輸出語言：Gemini 的回答，以及 server 回給 Claude 的訊息（結尾、錯誤訊息）。
 # "zh-TW"（繁體中文，預設）或 "en"（English）。
 output_language = "zh-TW"
+
+# 沒附轉錄稿時，每支影片第一次分析前，先請 Claude 問你要不要貼 YouTube 轉錄稿（不耗額度）。
+# 不想被問就改成 false。
+ask_for_transcript = true
 
 # 回應長度上限（token），所有 profile 共用，範圍 256–65536。只有實際產生的部分才計算用量；
 # notes、tutorial 模式內容較長，所以設高一點，避免被截斷。

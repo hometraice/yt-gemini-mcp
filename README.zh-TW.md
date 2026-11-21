@@ -1,4 +1,4 @@
-> Version: v6.0 | 2026-11-22 | 輸出語言可設定（zh-TW／en）；支援 macOS（實驗性）；工具說明改英文
+> Version: v7.0 | 2026-11-22 | 由 server 強制每支影片先問一次轉錄稿；ask_for_transcript 設定；要求 Claude 保留結尾的版本行
 
 # yt-gemini-mcp
 
@@ -233,10 +233,11 @@ claude mcp list
 | `end` | int | 否 | 結束秒數，必須大於 `start` |
 | `detail` | `"low"` \| `"default"` | 否 | 畫面解析度，預設 `low`（省 token）；要看小字或細節用 `default` |
 | `transcript` | string | 否 | 你自己從 YouTube 複製的轉錄稿（最多 120,000 字元）。讓人名、產品名拼法更準，quotes 能逐字引用 |
+| `skip_transcript` | bool | 否 | 你選擇不附轉錄稿、直接分析時，由 Claude 設定 |
 
 **附上轉錄稿（選填）**
 
-你請 Claude 分析影片、但沒附轉錄稿時，Claude 會先問你要不要附上，還是直接分析。取得轉錄稿的步驟：
+每支影片第一次分析、又沒附轉錄稿時，server 先不呼叫 Gemini，而是請 Claude 問你：要附上轉錄稿，還是直接分析（這一步不耗額度）。每支影片只會問一次。取得轉錄稿的步驟：
 
 1. 在 YouTube 打開影片頁面，點資訊欄的「顯示完整資訊」
 2. 點「顯示轉錄稿」
@@ -244,6 +245,7 @@ claude mcp list
 
 - 畫面上的內容仍由 Gemini 看影片判斷；轉錄稿用來對照專有名詞拼法和原話。轉錄稿和語音對不上時，結果會標出來
 - 不想附就回「直接分析」；說「不要再問」，之後就不會再問
+- 完全不想被問：把 `config.toml` 的 `ask_for_transcript` 改成 `false`。沒附轉錄稿的結果，結尾會多一行提示
 - server 不會自己去 YouTube 抓轉錄稿：非官方的抓法違反 YouTube 服務條款，官方 API 只能下載自己影片的字幕
 - 轉錄稿和影片一樣當成不可信資料：包在帶隨機 id 的標記裡，Gemini 被要求不可執行裡面的任何指令
 - Claude 要把轉錄稿原封不動放進工具參數，長影片會比較慢、比較耗 token，建議只貼要分析的那一段。有 `start`／`end` 時，server 會依時間戳只留下那段時間（前後各多 30 秒）
@@ -270,7 +272,7 @@ claude mcp list
   - **chat 入口的主要模型**：Chat、網頁版、手機因為約 80 秒的限制，本來就用速度快的 flash-lite，不是額度或錯誤造成的。要更深入的分析，請改用 Claude Code
   - **備援模型**：主要模型失敗了，下一行會寫原因（逾時、HTTP 錯誤碼或今日額度已用完）
   - **重試 1 次後成功**：Gemini 幾秒內就回 503（過載），server 等 1.5 秒後對同一個模型再試一次。只有剩下的時間夠才會重試，每個模型最多 1 次
-  - 最後的 `yt-gemini-mcp v…` 是目前載入的程式版本；更新後還看到舊版號，代表要完全重開 Claude Desktop
+  - 最後的 `yt-gemini-mcp v…` 是目前載入的程式版本；更新後還看到舊版號，代表要完全重開 Claude Desktop。Claude 被要求在回覆最後原樣附上這一行；沒附的話，可以在 Claude 裡展開工具呼叫看原始結果
 - 回覆最後寫了「今日額度已用完」，代表那個模型要等每日重置（太平洋時間午夜，台灣時間約 16:00）才會再用。
 
 **把教學影片整理成 Claude 能重複使用的做法**
@@ -303,6 +305,7 @@ Claude 不會因為看過影片就「記住」。要讓它以後都會用，要�
 - `thinking_level`：`low`／`medium`／`high`。越高越深入，但越慢、用量越多
 - `timeout_seconds`：整次呼叫的總上限；`attempt_timeout_seconds`：主要模型最多等幾秒就換備援
 - `[gemini]` 的 `output_language`：`"zh-TW"`（繁體中文，預設）或 `"en"`（英文）。決定 Gemini 的回答，以及 server 回給 Claude 的訊息（結尾、錯誤訊息）。給 Claude 讀的工具說明一律是英文，Claude 回你時仍會用你的語言
+- `[gemini]` 的 `ask_for_transcript`：`true`（預設）或 `false`。開啟時，每支影片第一次分析、沒附轉錄稿，會先問你要不要附上
 - `[gemini]` 的 `max_output_tokens`：回應長度上限，預設 16384
 - 不使用 `temperature`：官方已棄用 Gemini 3 系列的這個參數，`config.toml` 裡有它的話 server 會拒絕啟動
 

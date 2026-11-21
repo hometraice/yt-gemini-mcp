@@ -155,6 +155,7 @@ class TestEnglishAnalysis(unittest.TestCase):
 class TestServerEnglish(unittest.TestCase):
     def setUp(self):
         for patcher in (mock.patch.object(ratelimit, "limiter", ratelimit.CallLimiter()),
+                        mock.patch.object(server, "_should_ask_for_transcript", return_value=False),
                         mock.patch.object(server, "load_settings",
                                           return_value=Settings(model="m-main", timeout_seconds=30,
                                                                 max_output_tokens=1024, language="en"))):

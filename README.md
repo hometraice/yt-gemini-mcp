@@ -1,4 +1,4 @@
-> Version: v6.0 | 2026-11-22 | Output language setting (zh-TW / en); macOS support (experimental); tool descriptions in English
+> Version: v7.0 | 2026-11-22 | The server makes Claude ask about the transcript once per video; ask_for_transcript setting; footer line kept
 
 # yt-gemini-mcp
 
@@ -173,16 +173,17 @@ Just ask Claude, for example:
 | `end` | int | no | End time in seconds (must be greater than `start`) |
 | `detail` | `"low"` \| `"default"` | no | Frame resolution, default `low` (cheaper); use `default` for small on-screen text |
 | `transcript` | string | no | The YouTube transcript you copied yourself (max 120,000 chars). Improves spelling of names and lets `quotes` cite the exact words |
+| `skip_transcript` | bool | no | Set by Claude when you chose to analyze without a transcript |
 
 ### Adding a transcript (optional)
 
-When you ask Claude to analyze a video without a transcript, Claude first asks whether you want to add one, or just analyze. To get the transcript:
+The first time you analyze a video without a transcript, the server does not call Gemini yet: it tells Claude to ask you whether you want to add the transcript or just analyze (this uses no quota). Each video is asked about only once. To get the transcript:
 
 1. Open the video on YouTube and click **...more** under the video
 2. Click **Show transcript**
 3. Select all of the transcript, copy it, and paste it into the chat
 
-Gemini still watches the video for what is on screen; the transcript is used for exact names and quotes. Where it disagrees with the audio, the result says so. Answer "just analyze" (or "don't ask again") to skip.
+Gemini still watches the video for what is on screen; the transcript is used for exact names and quotes. Where it disagrees with the audio, the result says so. Answer "just analyze" (or "don't ask again") to skip. To turn the question off entirely, set `ask_for_transcript = false` in `config.toml`; results without a transcript then end with a one-line tip instead.
 
 - The server never fetches transcripts itself: unofficial scrapers break YouTube's terms and the official API only serves captions for your own videos
 - The transcript is treated as untrusted data, like the video: it is wrapped in tags with a random id and Gemini is told never to follow instructions inside it
@@ -216,7 +217,7 @@ When a call fails, the message says which kind of failure it was:
 | Model temporarily overloaded (HTTP 503) | Google is short on capacity for this model | Try again in about a minute |
 | Exceeded Google's time limit (HTTP 504) | Gemini took too long on Google's side | Analyze a shorter range with `start`/`end`; keep `detail="low"` |
 | No response within N seconds; stopped waiting | The server's own time budget ran out | In `chat`, try again or switch to Claude Code (`code`, longer budget); split long videos |
-- `yt-gemini-mcp v…` is the version currently loaded; if you still see an old version after updating, fully restart Claude Desktop.
+- `yt-gemini-mcp v…` is the version currently loaded; if you still see an old version after updating, fully restart Claude Desktop. Claude is asked to repeat this footer line at the end of its reply; if it does not, expand the tool call in the Claude app to see the raw result.
 
 ### Tips
 
@@ -239,6 +240,7 @@ Each entry point (profile) has its own models and limits; pick one with `--profi
 - `thinking_level` — `low` / `medium` / `high`
 - `timeout_seconds`, `attempt_timeout_seconds` — total budget and how long to wait for the primary model
 - `[gemini] output_language` — `"zh-TW"` (Traditional Chinese, default) or `"en"` (English). Controls Gemini's answer and the messages the server returns to Claude (footer, errors). The descriptions Claude reads (tool and parameter descriptions, server instructions) are always in English; Claude still replies in your language
+- `[gemini] ask_for_transcript` — `true` (default) or `false`. When true, the first analysis of each video without a transcript first asks you whether to add one
 - `[gemini] max_output_tokens` — response length cap (default 16384)
 - `[limits]` — `max_concurrent` (2), `max_calls_per_minute` (5), `max_calls_per_day` (100, rolling 24 h). Limits always apply, even if the section is missing
 - `temperature` is not used (deprecated for Gemini 3 models); the server refuses to start if it is present
