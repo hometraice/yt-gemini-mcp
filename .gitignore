@@ -1,0 +1,48 @@
+# Version: v1.1 | 2026-11-21 | 加上 notes/：開發筆記只留在本機，不公開
+
+# ── Secrets：一律不 commit ─────────────────────
+# 本專案的 API key 只存在 Windows Credential Manager，不會有任何檔案存 key。
+# 以下規則是第二道防線：萬一有人誤建這類檔案，也不會被 commit。
+.env
+.env.*
+*.key
+*.pem
+*.pfx
+*.p12
+credentials*
+*.local.*
+.npmrc
+.pypirc
+secrets.*
+client_secret*.json
+service-account*.json
+
+# ── 本機開發筆記（進度、交接、參考資料、歷史備份）：只留在本機，不上傳 ──
+notes/
+
+# ── Claude Code 本機檔案 ──────────────────────
+.claude/settings.local.json
+CLAUDE.local.md
+.claude/worktrees/
+
+# ── Python / uv ───────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+
+# ── Node ──────────────────────────────────────
+node_modules/
+
+# ── Logs / 編輯器 / 作業系統 ──────────────────
+*.log
+logs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+.DS_Store

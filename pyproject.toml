@@ -1,0 +1,31 @@
+[project]
+name = "yt-gemini-mcp"
+version = "0.4.0"
+description = "Local stdio MCP server that lets Claude analyze public YouTube videos through the Gemini API"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "hometraice" }]
+keywords = ["mcp", "claude", "gemini", "youtube", "model-context-protocol"]
+classifiers = [
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.12",
+]
+# 供應鏈：只允許這三個直接相依套件，版本由 uv.lock 鎖定。
+dependencies = [
+    "google-genai==2.34.0",
+    "keyring==25.7.0",
+    "mcp==2.3.0",
+]
+
+[project.urls]
+Repository = "https://github.com/hometraice/yt-gemini-mcp"
+Issues = "https://github.com/hometraice/yt-gemini-mcp/issues"
+
+[tool.uv]
+# 這是應用程式，不打包成 library。
+package = false
+# 供應鏈：不使用最近兩週內才發布的版本，避開「剛上架就被植入惡意程式」的套件。
+# 要升級時再把日期往後調，並重新執行 uv lock。
+exclude-newer = "2026-11-06T00:00:00Z"

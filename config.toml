@@ -1,0 +1,49 @@
+# Version: v4.0 | 2026-11-21 | 新增 [limits]：同時進行數、每分鐘與每 24 小時的呼叫上限
+#
+# yt-gemini-mcp 設定檔
+#
+# 這個檔案「不可以」放 API key。API key 只存在 Windows Credential Manager，
+# 請用 `uv run set_key.py` 設定。若這裡出現任何像 key 的內容，server 會拒絕啟動。
+#
+# 不再使用 temperature：官方已棄用 Gemini 3 系列的 temperature（API 會忽略），
+# 這裡若還有 temperature，server 會拒絕啟動並提示移除。
+
+[gemini]
+# 回應長度上限（token），所有 profile 共用，範圍 256–65536。只有實際產生的部分才計算用量；
+# notes、tutorial 模式內容較長，所以設高一點，避免被截斷。
+max_output_tokens = 16384
+
+# ── 呼叫上限（保護額度）─────────────────────────────────────────────
+# 防止 Claude 被影片內容誘導、或自己陷入迴圈，連續呼叫把 Gemini 額度用完。
+# 超過就直接拒絕並說明原因。每個 server（Chat、Code 各一個）各自計算；拿掉這個區塊也會套用以下預設值。
+[limits]
+max_concurrent = 2          # 同時進行的分析數，範圍 1–5
+max_calls_per_minute = 5    # 每分鐘幾次，範圍 1–60（free tier 的 3.8-flash 約每分鐘 5 次）
+max_calls_per_day = 100     # 最近 24 小時幾次，範圍 1–2000
+
+# ── 依使用入口設定 ─────────────────────────────────────────────────
+# 註冊 MCP 時用 `--profile <名稱>` 指定；沒指定就用 chat。每個 profile 的欄位：
+#   model：主要模型 ID
+#   fallback_models：主要模型逾時、過載（5xx）或額度用完（429）時依序改用，最多 3 個；不需要就寫 []
+#   thinking_level：思考強度 low／medium／high（不開放 minimal：gemini-3.8-flash 不支援）
+#   timeout_seconds：整次呼叫（含備援）的總時間上限，範圍 10–600
+#   attempt_timeout_seconds：主要模型最多等幾秒就改用備援，範圍 5–600，且必須小於 timeout_seconds
+# 可用模型與額度請以 https://ai.google.dev/gemini-api/docs/pricing 與 AI Studio 為準。
+
+# Claude Desktop 的一般 Chat、網頁版、手機 App（經桌機呼叫）：
+# 這條路約 80 秒就放棄等待，所以總時間要低於 80，主要模型用速度快的 flash-lite。
+[profiles.chat]
+model = "gemini-3.5-flash-lite"
+fallback_models = []
+thinking_level = "low"
+timeout_seconds = 70
+attempt_timeout_seconds = 35
+
+# Claude Code（Desktop 的 Code 分頁、終端機 claude、Remote Control）：
+# 沒有 80 秒限制，用分析較深的 gemini-3.8-flash，失敗時改用 flash-lite。
+[profiles.code]
+model = "gemini-3.8-flash"
+fallback_models = ["gemini-3.5-flash-lite"]
+thinking_level = "medium"
+timeout_seconds = 240
+attempt_timeout_seconds = 150
