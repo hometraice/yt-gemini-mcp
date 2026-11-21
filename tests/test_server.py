@@ -21,7 +21,7 @@ class TestSurface(unittest.TestCase):
         self.assertTrue(tool.annotations.read_only_hint)
         self.assertFalse(tool.annotations.idempotent_hint)  # 每次呼叫都消耗額度
         self.assertEqual(set(tool.input_schema["properties"]),
-                         {"url", "mode", "question", "start", "end", "detail"})
+                         {"url", "mode", "question", "start", "end", "detail", "transcript"})
         self.assertEqual(tool.input_schema["required"], ["url"])
         self.assertEqual(set(tool.input_schema["properties"]["mode"]["enum"]), set(gemini.MODES))
 

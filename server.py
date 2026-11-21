@@ -63,6 +63,11 @@ mcp = MCPServer(
         "建議流程：先用 mode=\"summary\" 掌握全貌，再針對使用者在意的段落用 start/end"
         "搭配 question 或其他 mode 深入；教學影片用 mode=\"tutorial\"。"
         "教學內容可能過時，要照做或寫成文件前，請對照官方文件確認。"
+        "使用者要分析影片但沒有提供轉錄稿時，先詢問一次：要不要附上 YouTube 轉錄稿"
+        "（步驟：開啟影片頁面 →「顯示完整資訊」→「顯示轉錄稿」→ 全選複製 → 貼回對話），"
+        "還是直接分析。附上轉錄稿能讓專有名詞拼法與原話更準確。"
+        "使用者選直接分析或說不要再問，就不再詢問；同一支影片之後的分段分析沿用已貼上的轉錄稿，"
+        "但只放該段時間的部分。"
     ),
 )
 
@@ -109,6 +114,16 @@ async def analyze_youtube(
         Literal["low", "default"],
         Field(description="畫面解析度。low（預設）省 token；需要看清楚畫面細節或小字時用 default。"),
     ] = "low",
+    transcript: Annotated[
+        str | None,
+        # 先在參數解析時擋掉明顯過大的輸入；精確上限（清理後 120,000 字元）在 validate_transcript。
+        Field(max_length=240_000, description=(
+            "使用者自己從 YouTube「顯示轉錄稿」複製貼上的轉錄稿（含時間戳），最多 120,000 字元。"
+            "原封不動照抄使用者貼的文字，不要自己編寫、摘要或翻譯；使用者沒提供就不要填。"
+            "有 start/end 時只放那段時間（前後多留約 30 秒）的轉錄稿即可，不要每段都放整份；"
+            "server 也會依時間戳自動裁切。用來校正專有名詞拼法、讓 quotes 逐字引用。"
+        )),
+    ] = None,
 ) -> str:
     """請 Gemini 觀看一支公開的 YouTube 影片，依 mode 產生分析，或回答 question。
 
@@ -116,6 +131,9 @@ async def analyze_youtube(
     只支援公開影片（私人、不公開影片無法分析）。
 
     使用建議：
+    - 使用者沒有提供轉錄稿時，呼叫前先問一次要不要附上（步驟：影片頁面「顯示完整資訊」→「顯示轉錄稿」→ 全選複製
+      → 貼回對話），或直接分析；使用者選直接分析就不要再問。轉錄稿要照抄使用者貼的文字放進 transcript；
+      分段分析時只放該段時間的部分。
     - 先用 mode="summary" 掌握全貌，再針對重要段落用 start/end（可搭配 question 或其他 mode）深入。
     - 教學、實作影片要學做法：mode="tutorial"；畫面上有程式碼、指令或小字時加 detail="default"。
     - 長影片（超過約 20 分鐘）或要 notes、tutorial 這類長輸出時，用 start/end 分段，每段 5–10 分鐘。
@@ -133,6 +151,10 @@ async def analyze_youtube(
         q = validation.validate_question(question)
         s, e = validation.validate_time_range(start, end)
         d = validation.validate_detail(detail)
+        t = validation.validate_transcript(transcript)
+        clipped = False
+        if t:
+            t, clipped = validation.clip_transcript(t, s, e)
     except validation.ValidationError as exc:
         raise ToolError(f"參數錯誤：{exc}") from None
 
@@ -141,13 +163,14 @@ async def analyze_youtube(
     except ConfigError as exc:
         raise ToolError(redact(str(exc))) from None
 
-    log.info("analyze_youtube video=%s mode=%s range=%s-%s detail=%s profile=%s",
-             video.video_id, m, s, e, d, settings.profile)
+    # 轉錄稿只記字數，不記內容。
+    log.info("analyze_youtube video=%s mode=%s range=%s-%s detail=%s profile=%s transcript_chars=%d clipped=%s",
+             video.video_id, m, s, e, d, settings.profile, len(t) if t else 0, clipped)
     try:
         with ratelimit.limiter.slot(settings.max_concurrent, settings.max_calls_per_minute,
                                     settings.max_calls_per_day):
             result = await gemini.analyze_video(
-                video, question=q, start=s, end=e, detail=d, settings=settings, mode=m
+                video, question=q, start=s, end=e, detail=d, settings=settings, mode=m, transcript=t
             )
     except ratelimit.RateLimitError as exc:
         log.warning("analyze_youtube rejected by call limit: %s", exc)
@@ -159,8 +182,12 @@ async def analyze_youtube(
     if s is not None or e is not None:
         span = f"{gemini.format_timestamp(s or 0)}–{gemini.format_timestamp(e) if e is not None else '結尾'}"
     role = "主要模型" if result.model == settings.model else "備援模型"
+    transcript_note = "無"
+    if t:
+        transcript_note = f"有（{len(t)} 字，已依範圍裁切）" if clipped else f"有（{len(t)} 字）"
     footer = (
         f"（模型：{result.model}，{settings.profile} 入口的{role}；模式：{m}；範圍：{span}；解析度：{d}；"
+        f"轉錄稿：{transcript_note}；"
         f"yt-gemini-mcp v{__version__}）"
     )
     if m == "tutorial":

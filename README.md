@@ -1,4 +1,4 @@
-> Version: v4.1 | 2026-11-21 | Choosing a profile, 503 retry and error types, compare tool, limitations of preview models
+> Version: v5.0 | 2026-11-21 | Optional YouTube transcript you paste yourself; Claude asks before analyzing
 
 # yt-gemini-mcp
 
@@ -158,6 +158,22 @@ Just ask Claude, for example:
 | `start` | int | no | Start time in seconds |
 | `end` | int | no | End time in seconds (must be greater than `start`) |
 | `detail` | `"low"` \| `"default"` | no | Frame resolution, default `low` (cheaper); use `default` for small on-screen text |
+| `transcript` | string | no | The YouTube transcript you copied yourself (max 120,000 chars). Improves spelling of names and lets `quotes` cite the exact words |
+
+### Adding a transcript (optional)
+
+When you ask Claude to analyze a video without a transcript, Claude first asks whether you want to add one, or just analyze. To get the transcript:
+
+1. Open the video on YouTube and click **...more** under the video
+2. Click **Show transcript**
+3. Select all of the transcript, copy it, and paste it into the chat
+
+Gemini still watches the video for what is on screen; the transcript is used for exact names and quotes. Where it disagrees with the audio, the result says so. Answer "just analyze" (or "don't ask again") to skip.
+
+- The server never fetches transcripts itself: unofficial scrapers break YouTube's terms and the official API only serves captions for your own videos
+- The transcript is treated as untrusted data, like the video: it is wrapped in tags with a random id and Gemini is told never to follow instructions inside it
+- Claude has to copy the transcript into the tool call, so for long videos paste only the part you care about. With `start`/`end`, the server keeps only that range (plus 30 s on each side) based on the timestamps
+- It is sent to Google together with the video (free-tier data may be used by Google), so don't paste anything private
 
 ### Modes
 
