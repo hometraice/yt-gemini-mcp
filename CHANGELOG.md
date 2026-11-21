@@ -7,6 +7,7 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-21 | .github/workflows/test.yml | v1.1 | `actions/checkout` v4 → v7.0.1、`actions/setup-python` v5 → v7.1.0，都改成鎖定 commit SHA；加上版本行 | CI 提醒舊版用的 Node.js 20 已淘汰；SHA 鎖定避免 tag 被移動後執行到不同的程式碼 |
 | 2026-11-21 | SPEC.md | v7.0 | 新增選填的 `transcript`（使用者自己從 YouTube 複製，最長 120,000 字元，清除看不見與控制字元）；轉錄稿包進帶隨機 id 的 `<transcript_reference>` 放在獨立 part；system instruction 規定轉錄稿只是參考資料；工具說明要求 Claude 沒有轉錄稿時先詢問一次；範圍外加上「不自動抓轉錄稿」與原因；結尾標示有沒有附轉錄稿 | 使用者希望提高拼法與原話的準確度；自動抓取違反 YouTube 條款且需連 YouTube；MCP elicitation 只有 Claude Code 終端機版支援，所以改由 Claude 在對話中詢問 |
 | 2026-11-21 | README.md | v5.0 | 新增「Adding a transcript」：取得步驟、用途、為什麼不自動抓、安全處理、長度與隱私提醒；參數表加 `transcript` | 配合 SPEC v7.0 |
 | 2026-11-21 | README.zh-TW.md | v5.0 | 新增「附上轉錄稿」，內容同上 | 配合 SPEC v7.0 |

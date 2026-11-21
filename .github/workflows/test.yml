@@ -1,3 +1,4 @@
+# Version: v1.1 | 2026-11-21 | actions 升級到 Node 24 的版本，並鎖定 commit SHA
 # 每次 push／PR 在 Windows 上跑單元測試（只用 mock，不需要也不使用任何 key）。
 name: tests
 
@@ -14,10 +15,11 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      # 供應鏈：第三方 action 鎖定 commit SHA（tag 可以被移動，SHA 不行），註解寫對應的版本。
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version-file: ".python-version"
       - name: Install uv
