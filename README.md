@@ -1,4 +1,4 @@
-> Version: v7.0 | 2026-11-22 | The server makes Claude ask about the transcript once per video; ask_for_transcript setting; footer line kept
+> Version: v8.0 | 2026-11-22 | Transcript question only with clickable buttons; otherwise analyze directly with a tip
 
 # yt-gemini-mcp
 
@@ -177,7 +177,7 @@ Just ask Claude, for example:
 
 ### Adding a transcript (optional)
 
-The first time you analyze a video without a transcript, the server does not call Gemini yet: it tells Claude to ask you whether you want to add the transcript or just analyze (this uses no quota). Each video is asked about only once. To get the transcript:
+The first time you analyze a video without a transcript, the server does not call Gemini yet (this uses no quota). If your Claude app can show clickable options (for example the Code tab), Claude asks you with two buttons: **Paste transcript** or **Just analyze**. If it cannot (for example Claude Desktop chat), Claude does not ask in text; it analyzes right away and the result ends with a tip about adding a transcript. Each video is checked only once. To get the transcript:
 
 1. Open the video on YouTube and click **...more** under the video
 2. Click **Show transcript**

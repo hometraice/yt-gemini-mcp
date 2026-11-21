@@ -7,6 +7,9 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-22 | SPEC.md | v10.0 | 轉錄稿詢問：Claude 有可點選的選項工具時才用按鈕問；沒有就不用文字問，直接帶 `skip_transcript=true` 分析，結尾附提示 | 使用者實測 v9.0 在 Chat 被用文字問、要打字回答，太不方便；希望有按鈕才問、沒有就直接分析 |
+| 2026-11-22 | README.md | v8.0 | 轉錄稿段落改成：有按鈕才問，沒有就直接分析並附提示 | 配合 SPEC v10.0 |
+| 2026-11-22 | README.zh-TW.md | v8.0 | 同上 | 配合 SPEC v10.0 |
 | 2026-11-22 | SPEC.md | v9.0 | 轉錄稿詢問改由 server 強制：每支影片第一次沒附轉錄稿時不呼叫 Gemini，回固定說明請 Claude 詢問使用者；新增 `skip_transcript` 參數與 `ask_for_transcript` 設定；同一支影片只攔一次、記錄上限 500 支；沒附轉錄稿時結尾加提示；要求 Claude 原樣附上結尾的模型與版本 | 只寫在說明裡時 Claude 常常不問（使用者在新 session 實際遇到）；Claude 重寫回覆時會省略版本行，使用者看不到用的是哪一版 |
 | 2026-11-22 | config.toml | v6.0 | 新增 `[gemini] ask_for_transcript = true` | 配合 SPEC v9.0 |
 | 2026-11-22 | README.md | v7.0 | 轉錄稿段落改成 server 會先問；`skip_transcript` 參數；`ask_for_transcript` 設定；結尾版本行看不到時展開工具呼叫 | 配合 SPEC v9.0 |

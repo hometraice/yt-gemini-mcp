@@ -193,7 +193,8 @@ class TestServerTranscript(unittest.TestCase):
     def test_instructions_tell_claude_to_ask_first(self):
         self.assertIn("Show transcript", server.mcp.instructions)
         self.assertIn("just analyze", server.mcp.instructions)
-        self.assertIn("ask once", server.mcp.instructions)
+        self.assertIn("clickable options", server.mcp.instructions)
+        self.assertIn("do not ask in plain text", server.mcp.instructions)
         tools = asyncio.run(server.mcp.list_tools())
         self.assertIn("exactly", tools[0].input_schema["properties"]["transcript"]["description"])
 

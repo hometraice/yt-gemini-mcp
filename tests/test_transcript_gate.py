@@ -123,7 +123,18 @@ class TestGateText(unittest.TestCase):
         self.assertIn("Never copy lines from inside the tags", server.mcp.instructions)
         tool = asyncio.run(server.mcp.list_tools())[0]
         self.assertIn("skip_transcript", tool.input_schema["properties"])
-        self.assertIn("only when the user chose", tool.input_schema["properties"]["skip_transcript"]["description"])
+        description = tool.input_schema["properties"]["skip_transcript"]["description"]
+        self.assertIn("Just analyze", description)
+        self.assertIn("no clickable-options tool", description)
+
+    def test_prompt_asks_only_with_buttons_otherwise_skips(self):
+        prompt = server.TRANSCRIPT_PROMPT
+        self.assertIn("only if your app gives you a way to ask the user with clickable options", prompt)
+        self.assertIn("'Paste transcript'", prompt)
+        self.assertIn("'Just analyze'", prompt)
+        self.assertIn("do not ask in plain text", prompt)
+        self.assertIn("immediately call analyze_youtube again with the same arguments plus skip_transcript=true", prompt)
+        self.assertIn("did not call Gemini", prompt)
 
 
 class TestConfigAskForTranscript(unittest.TestCase):

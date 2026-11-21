@@ -1,4 +1,4 @@
-> Version: v9.0 | 2026-11-22 | 轉錄稿詢問改由 server 強制（每支影片攔一次、可關閉）；結尾提示可附轉錄稿；要求 Claude 原樣附上結尾的模型與版本
+> Version: v10.0 | 2026-11-22 | 轉錄稿詢問：有可點選的按鈕才問，沒有就不用文字問、直接分析
 
 # yt-gemini-mcp 開發規格
 
@@ -160,10 +160,14 @@ MCP tool：`analyze_youtube`
 | detail | "low" \| "default" | 否 | media resolution，預設 low |
 | transcript | string | 否 | 使用者從 YouTube「顯示轉錄稿」自己複製的全文（含時間戳），最長 120,000 字元。用來校正專有名詞拼法、讓 quotes 逐字引用 |
 
-| skip_transcript | bool | 否 | 使用者選擇不附轉錄稿、直接分析時設為 true，跳過詢問關卡 |
+| skip_transcript | bool | 否 | 使用者選擇「直接分析」（或說過不要再問）時，或 Claude 沒有可點選的選項工具時設為 true，跳過詢問關卡 |
 
 **轉錄稿的詢問流程**（由 server 強制；v8.0 以前只寫在說明裡，Claude 常常不問）：
-- `config.toml` 的 `[gemini] ask_for_transcript`（布林值，預設 `true`）開啟時：一支影片第一次被分析、沒有 `transcript`、也沒有 `skip_transcript=true`，server **不呼叫 Gemini**，直接回一段給 Claude 的說明（英文），要求它用使用者的語言詢問「貼上轉錄稿」或「直接分析」，並附取得步驟（開啟影片頁面 →「顯示完整資訊」→「顯示轉錄稿」→ 全選複製 → 貼回對話）
+- `config.toml` 的 `[gemini] ask_for_transcript`（布林值，預設 `true`）開啟時：一支影片第一次被分析、沒有 `transcript`、也沒有 `skip_transcript=true`，server **不呼叫 Gemini**，直接回一段給 Claude 的說明（英文）：
+  - **Claude 有可點選的選項工具（例如 Claude Code 的選項按鈕）時**：用按鈕詢問「貼上轉錄稿」或「直接分析」；選貼上就附取得步驟（開啟影片頁面 →「顯示完整資訊」→「顯示轉錄稿」→ 全選複製 → 貼回對話）
+  - **沒有按鈕時（例如 Chat）**：不用文字問，立刻帶 `skip_transcript=true` 重新呼叫，結果結尾會有可附轉錄稿的提示
+  - 原因：使用者希望能用點的回答；用文字問要打字，太不方便（v9.0 實測）
+  - server 無法得知 Claude 有沒有按鈕可用，所以這個判斷交給 Claude
 - 防止卡住：每個 server process 對同一支影片只攔一次，第二次呼叫一定照常分析；記錄只在記憶體、最多 500 支影片（超過就丟掉最舊的）
 - 不耗額度：關卡在呼叫上限之前，不佔用每分鐘／每日次數，也不呼叫 Gemini
 - 關卡回覆是 server 自己產生的固定文字，不含任何影片或使用者內容，所以不需要包進不可信標記
