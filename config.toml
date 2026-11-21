@@ -1,14 +1,18 @@
-# Version: v4.0 | 2026-11-21 | 新增 [limits]：同時進行數、每分鐘與每 24 小時的呼叫上限
+# Version: v5.0 | 2026-11-22 | 新增 output_language（zh-TW／en）
 #
 # yt-gemini-mcp 設定檔
 #
-# 這個檔案「不可以」放 API key。API key 只存在 Windows Credential Manager，
+# 這個檔案「不可以」放 API key。API key 只存在 Windows Credential Manager 或 macOS Keychain，
 # 請用 `uv run set_key.py` 設定。若這裡出現任何像 key 的內容，server 會拒絕啟動。
 #
 # 不再使用 temperature：官方已棄用 Gemini 3 系列的 temperature（API 會忽略），
 # 這裡若還有 temperature，server 會拒絕啟動並提示移除。
 
 [gemini]
+# 輸出語言：Gemini 的回答，以及 server 回給 Claude 的訊息（結尾、錯誤訊息）。
+# "zh-TW"（繁體中文，預設）或 "en"（English）。
+output_language = "zh-TW"
+
 # 回應長度上限（token），所有 profile 共用，範圍 256–65536。只有實際產生的部分才計算用量；
 # notes、tutorial 模式內容較長，所以設高一點，避免被截斷。
 max_output_tokens = 16384

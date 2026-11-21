@@ -1,4 +1,4 @@
-> Version: v5.0 | 2026-11-21 | 選填的 YouTube 轉錄稿（使用者自己貼上）；分析前由 Claude 先詢問
+> Version: v6.0 | 2026-11-22 | 輸出語言可設定（zh-TW／en）；支援 macOS（實驗性）；工具說明改英文
 
 # yt-gemini-mcp
 
@@ -8,9 +8,9 @@
 
 - 本機 stdio MCP server，**不開任何網路 port**
 - 只有一個工具 `analyze_youtube`，沒有寫檔、shell、任意 HTTP request
-- API key 只存在 **Windows Credential Manager**，不在任何檔案、環境變數或 Claude 設定裡
+- API key 只存在**作業系統的安全儲存區**（Windows Credential Manager 或 macOS Keychain），不在任何檔案、環境變數或 Claude 設定裡
 - 每個人用**自己的** Gemini API key（Google AI Studio 可免費申請）
-- 目前**只支援 Windows**；分析結果固定用**繁體中文**輸出
+- 支援 **Windows**，**macOS 為實驗性支援**；輸出可選**繁體中文或英文**（`config.toml` 的 `output_language`）
 
 ---
 
@@ -18,7 +18,7 @@
 
 | 風險 | 對策 |
 |---|---|
-| API key 外洩 | key 只存在 Windows Credential Manager（`keyring`，service=`yt-gemini-mcp`、user=`gemini`），程式固定使用 WinVault 後端。不讀 `.env`、不讀環境變數。`config.toml` 若出現疑似 key，server 拒絕啟動 |
+| API key 外洩 | key 只存在作業系統的安全儲存區（`keyring`，service=`yt-gemini-mcp`、user=`gemini`），依平台固定後端：Windows 用 WinVault、macOS 用 Keychain；其他平台一律拒絕，不會退回明文檔案。不讀 `.env`、不讀環境變數。`config.toml` 若出現疑似 key，server 拒絕啟動 |
 | key 留在畫面或 history | `set_key.py` 用 `getpass` 隱藏輸入；不接受命令列參數或 pipe；終端機無法隱藏輸入時直接中止 |
 | key 出現在 log／錯誤訊息 | 所有 log 走 stderr 並經過遮罩（`AIza…`、`?key=`、`x-goog-api-key`、實際使用中的 key），錯誤訊息只回傳固定的中文說明，不吐 stack trace |
 | SSRF／濫用 | 只接受 `youtube.com/watch?v=`、`youtu.be/`、`youtube.com/shorts/`、`m.youtube.com/watch?v=`；host 白名單完全比對；ID 必須是 11 碼；一律用 ID 重組 `https://www.youtube.com/watch?v=<ID>` 再送出 |
@@ -39,7 +39,8 @@ yt-gemini-mcp/
 ├── config.toml         各使用入口的模型、思考強度、時間上限、呼叫上限等非機密設定
 ├── yt_gemini/          內部模組
 │   ├── config.py         讀取並檢查 config.toml
-│   ├── keystore.py       Windows Credential Manager 存取
+│   ├── keystore.py       安全儲存區存取（Windows Credential Manager／macOS Keychain）
+│   ├── messages.py       使用者看得到的訊息（繁中／英文）
 │   ├── redaction.py      機密遮罩（log、錯誤訊息）
 │   ├── validation.py     URL 與參數驗證
 │   ├── gemini.py         呼叫 Gemini、備援、錯誤轉換、token 用量 log
@@ -67,7 +68,7 @@ yt-gemini-mcp/
 |---|---|---|---|
 | [`mcp`](https://pypi.org/project/mcp/) | 2.3.0 | MIT | MCP 官方 Python SDK（`MCPServer`、stdio transport） |
 | [`google-genai`](https://pypi.org/project/google-genai/) | 2.34.0 | Apache-2.0 | Google 官方 Gemini SDK |
-| [`keyring`](https://pypi.org/project/keyring/) | 25.7.0 | MIT | 讀寫 Windows Credential Manager |
+| [`keyring`](https://pypi.org/project/keyring/) | 25.7.0 | MIT | 讀寫 Windows Credential Manager／macOS Keychain |
 
 **外部服務**
 
@@ -81,12 +82,20 @@ yt-gemini-mcp/
 
 ## 安裝
 
-需求：Windows 10/11、Git、一般使用者權限（不需要系統管理員）。
+需求：Windows 10/11 或 macOS（實驗性，見下方）、Git、一般使用者權限（不需要系統管理員）。
 
 **1. 安裝 uv**（不用另外裝 Python，uv 會管理）
 
+Windows（PowerShell）：
+
 ```powershell
 winget install --id=astral-sh.uv -e --source winget
+```
+
+macOS（終端機，需要 [Homebrew](https://brew.sh)）：
+
+```bash
+brew install uv
 ```
 
 裝完後**重開終端機**，PATH 才會更新。
@@ -105,7 +114,7 @@ cd yt-gemini-mcp
 uv sync --locked
 ```
 
-以下用 `<專案資料夾>` 代表剛剛 clone 下來的資料夾完整路徑，例如 `C:\Users\<你的帳號>\yt-gemini-mcp`。
+以下用 `<專案資料夾>` 代表剛剛 clone 下來的資料夾完整路徑，例如 `C:\Users\<你的帳號>\yt-gemini-mcp` 或 `/Users/<你的帳號>/yt-gemini-mcp`。
 
 ---
 
@@ -131,6 +140,7 @@ uv run set_key.py --check
 - 更換 key：再執行一次 `uv run set_key.py`
 - 刪除 key：`uv run set_key.py --delete`
 - 在 Windows 裡查看：控制台 → 認證管理員 → Windows 認證 → 一般認證 → `yt-gemini-mcp`
+- macOS：key 存在登入鑰匙圈（「鑰匙圈存取」App 可以看到 `yt-gemini-mcp`）。server 第一次讀取時 macOS 可能詢問是否允許，要求的程式是 uv 為這個專案管理的 Python
 
 **建議再加兩道保護**（在 Google 那一端）：
 
@@ -152,13 +162,13 @@ uv run set_key.py --check
 
 ## 註冊到 Claude Code
 
-在 Git Bash 執行（PowerShell 5.1 處理 `--` 參數的方式不同，所以用 Git Bash）：
+Windows 在 Git Bash 執行（PowerShell 5.1 處理 `--` 參數的方式不同，所以用 Git Bash）；macOS 用終端機：
 
 ```bash
 claude mcp add yt-gemini --scope user -- uv --directory '<專案資料夾>' run --locked server.py --profile code
 ```
 
-`--scope user` 代表所有專案都能用。`--profile code` 讓 Claude Code 使用分析較深的 `gemini-3.8-flash` 和較長的時間上限（240 秒）。注意指令裡**沒有任何 key**，server 啟動時會自己去 Credential Manager 讀取。
+`--scope user` 代表所有專案都能用。`--profile code` 讓 Claude Code 使用分析較深的 `gemini-3.8-flash` 和較長的時間上限（240 秒）。注意指令裡**沒有任何 key**，server 啟動時會自己去安全儲存區讀取。
 
 確認（Git Bash）：
 
@@ -176,7 +186,9 @@ claude mcp list
    (Get-Command uv).Source
    ```
 
-2. 在 Claude Desktop 開啟 **設定 → Developer → Edit Config**，編輯 `claude_desktop_config.json`，加入以下內容（換成你的路徑，反斜線要寫兩次）：
+   macOS：`which uv`（通常是 `/opt/homebrew/bin/uv`）。
+
+2. 在 Claude Desktop 開啟 **設定 → Developer → Edit Config**，編輯 `claude_desktop_config.json`，加入以下內容（換成你的路徑；Windows 的反斜線要寫兩次）：
 
    ```json
    {
@@ -191,6 +203,8 @@ claude mcp list
      }
    }
    ```
+
+   macOS 寫一般路徑即可，例如 `"command": "/opt/homebrew/bin/uv"`、`"--directory", "/Users/<你的帳號>/yt-gemini-mcp"`。
 
    **不要**加 `env` 區塊放 key，這個檔案是明文。這裡要用 `chat`（速度快的 flash-lite、70 秒），因為 Claude 網頁版和手機經由桌機呼叫時，約 80 秒就放棄等待。
 
@@ -245,7 +259,7 @@ claude mcp list
 | `quotes` | 需要引用講者的話 | 5–15 句重要原話與時間戳 |
 | `claims` | 想查證影片的說法 | 影片中的事實性主張、講者給的證據、查證優先度 |
 
-回答一律是繁體中文，附 `[mm:ss]` 時間戳，區分【畫面】與【語音】，不確定的地方會標明。人名、指令、程式碼這類內容畫面有出現就逐字抄寫，拼法沒把握會標「（拼法不確定）」。
+回答預設是繁體中文（`output_language = "en"` 則改成英文，標示用 `[Visual]`／`[Audio]`），附 `[mm:ss]` 時間戳，區分【畫面】與【語音】，不確定的地方會標明。人名、指令、程式碼這類內容畫面有出現就逐字抄寫，拼法沒把握會標「（拼法不確定）」。
 
 **怎麼得到比較好的結果**
 
@@ -288,6 +302,7 @@ Claude 不會因為看過影片就「記住」。要讓它以後都會用，要�
 - `model`、`fallback_models`：主要模型逾時、過載（5xx）或額度用完（429）時，依序改用備援模型（最多 3 個）。換備援之前，快速回 503 的模型會先在自己的等待時間內短重試 1 次
 - `thinking_level`：`low`／`medium`／`high`。越高越深入，但越慢、用量越多
 - `timeout_seconds`：整次呼叫的總上限；`attempt_timeout_seconds`：主要模型最多等幾秒就換備援
+- `[gemini]` 的 `output_language`：`"zh-TW"`（繁體中文，預設）或 `"en"`（英文）。決定 Gemini 的回答，以及 server 回給 Claude 的訊息（結尾、錯誤訊息）。給 Claude 讀的工具說明一律是英文，Claude 回你時仍會用你的語言
 - `[gemini]` 的 `max_output_tokens`：回應長度上限，預設 16384
 - 不使用 `temperature`：官方已棄用 Gemini 3 系列的這個參數，`config.toml` 裡有它的話 server 會拒絕啟動
 
@@ -333,7 +348,7 @@ uv run tools/compare_models.py "https://youtu.be/<影片ID>" --mode summary --st
 - 沒加 `--yes-use-quota` 時只印出會做什麼（dry-run：不讀 key、不連網路）；加上才會真的呼叫，**每個模型各用掉 1 次請求**（快速回 503 觸發自動重試時是 2 次）
 - 模型只能選 `config.toml` 裡有的；沒指定時比較每個 profile 的主要模型
 - 結果寫進 `logs\compare-<時間>-<隨機碼>\`（不會進 git）：每個模型一個 `.md`（Gemini 的輸出，包在不可信標記裡）、`summary.json`（耗時、token 數）和 `run.log`；log 只寫進 `run.log`，不印到終端機
-- key 只從 Credential Manager 讀，不會印出或寫進檔案
+- key 只從安全儲存區讀，不會印出或寫進檔案
 
 ---
 
@@ -360,7 +375,8 @@ uv run tools/compare_models.py "https://youtu.be/<影片ID>" --mode summary --st
 
 ## 已知限制
 
-- 只支援 Windows；只支援公開影片，一次分析一支；輸出固定是繁體中文。
+- 支援 Windows 與 macOS。**macOS 是實驗性支援**：CI 會在 macOS 跑單元測試，但還沒在真的 Mac 上驗證 Keychain，歡迎回報結果。Linux 尚不支援（沒有固定的安全儲存區，server 也不會退回存成明文檔案）。
+- 只支援公開影片，一次分析一支；輸出語言只有繁體中文與英文。`config.toml` 本身的錯誤訊息固定是中文（讀到語言設定之前就可能出錯）。
 - 主要模型逾時被中止時，Google 那邊可能仍在處理，仍可能計入額度。
 - `gemini-3.5-flash-lite`（Chat 的主要模型、Code 的備援）速度快，但分析深度比 `gemini-3.8-flash` 淺。
 - `gemini-3.8-flash` 是 preview 模型，常常過載（503／504）；這時 code 會改用 flash-lite。

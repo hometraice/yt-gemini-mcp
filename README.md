@@ -1,4 +1,4 @@
-> Version: v5.0 | 2026-11-21 | Optional YouTube transcript you paste yourself; Claude asks before analyzing
+> Version: v6.0 | 2026-11-22 | Output language setting (zh-TW / en); macOS support (experimental); tool descriptions in English
 
 # yt-gemini-mcp
 
@@ -8,9 +8,9 @@ A local MCP server that lets Claude (Claude Code / Claude Desktop) "watch" publi
 
 - Local **stdio** MCP server — opens **no network ports**
 - Exactly one read-only tool, `analyze_youtube`; no file writes, no shell, no arbitrary HTTP
-- Your API key lives **only in Windows Credential Manager** — never in files, environment variables, or Claude config
+- Your API key lives **only in your OS key store** (Windows Credential Manager or macOS Keychain) — never in files, environment variables, or Claude config
 - Bring your **own** Gemini API key (free to create in Google AI Studio)
-- **Windows only** for now; analysis output is in **Traditional Chinese** (see [Limitations](#limitations))
+- **Windows**, plus **macOS (experimental)**; output in **Traditional Chinese or English** (set `output_language` in `config.toml`)
 
 ---
 
@@ -18,7 +18,7 @@ A local MCP server that lets Claude (Claude Code / Claude Desktop) "watch" publi
 
 | Risk | Mitigation |
 |---|---|
-| API key leakage | Key stored only in Windows Credential Manager via `keyring` (service `yt-gemini-mcp`, user `gemini`), pinned to the WinVault backend. No `.env`, no environment variables. The server refuses to start if `config.toml` contains anything that looks like a key |
+| API key leakage | Key stored only in the OS key store via `keyring` (service `yt-gemini-mcp`, user `gemini`), pinned per platform: WinVault on Windows, Keychain on macOS; other platforms are refused, never a plaintext fallback. No `.env`, no environment variables. The server refuses to start if `config.toml` contains anything that looks like a key |
 | Key left on screen or in shell history | `set_key.py` uses `getpass` (hidden input); refuses command-line arguments and piped input; aborts if the terminal cannot hide input |
 | Key in logs or error messages | All logs go to stderr through a redacting formatter (`AIza…`, `?key=`, `x-goog-api-key`, and the actual key in use); errors are fixed, human-readable messages with no stack traces |
 | SSRF / abuse | Only `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `m.youtube.com/watch?v=` are accepted; exact host allowlist; 11-character video ID; the URL sent to Gemini is always rebuilt as `https://www.youtube.com/watch?v=<ID>` |
@@ -32,8 +32,8 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 ## Requirements
 
-- Windows 10/11, a normal (non-admin) user account
-- [Git](https://git-scm.com/download/win)
+- Windows 10/11, or macOS (experimental — see below); a normal (non-admin) user account
+- [Git](https://git-scm.com/downloads)
 - [uv](https://docs.astral.sh/uv/) (manages Python for you)
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
 - Claude Code and/or Claude Desktop
@@ -42,8 +42,16 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 
 **1. Install uv**
 
+Windows (PowerShell):
+
 ```powershell
 winget install --id=astral-sh.uv -e --source winget
+```
+
+macOS (Terminal, with [Homebrew](https://brew.sh)):
+
+```bash
+brew install uv
 ```
 
 Open a **new** terminal afterwards so `PATH` is updated.
@@ -62,7 +70,7 @@ cd yt-gemini-mcp
 uv sync --locked
 ```
 
-Below, `<project-dir>` means the full path of the cloned folder, e.g. `C:\Users\<you>\yt-gemini-mcp`.
+Below, `<project-dir>` means the full path of the cloned folder, e.g. `C:\Users\<you>\yt-gemini-mcp` or `/Users/<you>/yt-gemini-mcp`.
 
 ## Set your API key
 
@@ -79,6 +87,8 @@ uv run set_key.py --check
 ```
 
 You should see `[OK]` for every model used in `config.toml`. `--check` only fetches model metadata and does not consume generation quota.
+
+On macOS the key goes into your login Keychain. The first time the server reads it, macOS may ask whether to allow access — the requesting program is the Python that uv manages for this project.
 
 - Replace the key: run `uv run set_key.py` again
 - Delete the key: `uv run set_key.py --delete`
@@ -98,13 +108,13 @@ Rule of thumb: quick questions anywhere → `chat`; "I want everything in this v
 
 ## Register with Claude Code
 
-Run in **Git Bash** (Windows PowerShell 5.1 handles the `--` separator differently):
+On Windows run this in **Git Bash** (Windows PowerShell 5.1 handles the `--` separator differently); on macOS use Terminal:
 
 ```bash
 claude mcp add yt-gemini --scope user -- uv --directory '<project-dir>' run --locked server.py --profile code
 ```
 
-`--profile code` uses the stronger `gemini-3.8-flash` model and a longer time budget (240 s). Note that the command contains **no key** — the server reads it from Credential Manager at runtime.
+`--profile code` uses the stronger `gemini-3.8-flash` model and a longer time budget (240 s). Note that the command contains **no key** — the server reads it from the OS key store at runtime.
 
 Check with `claude mcp list`.
 
@@ -116,7 +126,9 @@ Check with `claude mcp list`.
    (Get-Command uv).Source
    ```
 
-2. In Claude Desktop open **Settings → Developer → Edit Config** and add (use your own paths; escape backslashes):
+   On macOS: `which uv` (usually `/opt/homebrew/bin/uv`).
+
+2. In Claude Desktop open **Settings → Developer → Edit Config** and add (use your own paths; on Windows escape backslashes):
 
    ```json
    {
@@ -131,6 +143,8 @@ Check with `claude mcp list`.
      }
    }
    ```
+
+   On macOS the same block works with plain paths, e.g. `"command": "/opt/homebrew/bin/uv"` and `"--directory", "/Users/<you>/yt-gemini-mcp"`.
 
    Do **not** add an `env` block with your key — this file is plain text. Use the `chat` profile here (fast `flash-lite`, 70 s budget): when Claude on the web or mobile calls a local MCP server through Claude Desktop, it gives up after roughly 80 seconds.
 
@@ -224,6 +238,7 @@ Each entry point (profile) has its own models and limits; pick one with `--profi
 - `model`, `fallback_models` — fallback is used on timeout, overload (5xx) or quota (429); max 3. Before falling back, a fast `503` gets one short retry on the same model (within that model's wait time)
 - `thinking_level` — `low` / `medium` / `high`
 - `timeout_seconds`, `attempt_timeout_seconds` — total budget and how long to wait for the primary model
+- `[gemini] output_language` — `"zh-TW"` (Traditional Chinese, default) or `"en"` (English). Controls Gemini's answer and the messages the server returns to Claude (footer, errors). The descriptions Claude reads (tool and parameter descriptions, server instructions) are always in English; Claude still replies in your language
 - `[gemini] max_output_tokens` — response length cap (default 16384)
 - `[limits]` — `max_concurrent` (2), `max_calls_per_minute` (5), `max_calls_per_day` (100, rolling 24 h). Limits always apply, even if the section is missing
 - `temperature` is not used (deprecated for Gemini 3 models); the server refuses to start if it is present
@@ -261,7 +276,7 @@ $env:YT_GEMINI_LIVE_TEST = "1"; uv run python -m unittest tests.test_live -v; Re
 uv run tools/compare_models.py "https://youtu.be/<id>" --mode summary --start 0 --end 300
 ```
 
-Without `--yes-use-quota` it only prints what it would do (dry run: no key read, no network). Add `--yes-use-quota` to actually call Gemini — **each model uses one request of your quota** (two if a fast `503` triggers the automatic retry). Only models listed in `config.toml` are accepted; by default it compares each profile's primary model. Results go to `logs\compare-<timestamp>-<random>\` (git-ignored): one `.md` per model with Gemini's output wrapped in untrusted tags, a `summary.json` with timings and token counts, and `run.log`. Logs are written only to `run.log`, never to the terminal. The key is read from Credential Manager and never printed or written.
+Without `--yes-use-quota` it only prints what it would do (dry run: no key read, no network). Add `--yes-use-quota` to actually call Gemini — **each model uses one request of your quota** (two if a fast `503` triggers the automatic retry). Only models listed in `config.toml` are accepted; by default it compares each profile's primary model. Results go to `logs\compare-<timestamp>-<random>\` (git-ignored): one `.md` per model with Gemini's output wrapped in untrusted tags, a `summary.json` with timings and token counts, and `run.log`. Logs are written only to `run.log`, never to the terminal. The key is read from the OS key store and never printed or written.
 
 Project layout:
 
@@ -270,7 +285,7 @@ server.py        MCP server entry point (the only tool: analyze_youtube)
 set_key.py       store / check / delete the API key
 tools/           opt-in developer tools (compare_models.py)
 config.toml      non-secret settings: profiles, models, time budgets, call limits
-yt_gemini/       internal modules (config, keystore, redaction, validation, gemini, quota, ratelimit, untrusted)
+yt_gemini/       internal modules (config, keystore, messages, redaction, validation, gemini, quota, ratelimit, untrusted)
 tests/           unit tests and the opt-in live test
 SPEC.md          design spec and threat model (Traditional Chinese)
 ```
@@ -281,8 +296,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
 ## Limitations
 
-- Windows only (the key store is pinned to Windows Credential Manager on purpose)
-- Output language is Traditional Chinese (set in the system instruction in `yt_gemini/gemini.py`)
+- Windows and macOS only. **macOS support is experimental**: unit tests run on macOS in CI, but Keychain access has not yet been verified on a real Mac — please report how it goes. Linux is not supported yet (there is no pinned secure key store, and the server never falls back to a plaintext file)
+- Output languages: Traditional Chinese and English. Error messages about `config.toml` itself are in Chinese, because they can occur before the language setting is read
 - Public videos only, one video per call
 - `gemini-3.8-flash` is a preview model and is often overloaded (503/504); `code` falls back to `flash-lite` when that happens
 - The `chat` profile has no fallback model (there is no time for one within 70 s). An occasional `503` is expected; the server retries once automatically, and if it still fails, just ask again

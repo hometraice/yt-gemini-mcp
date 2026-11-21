@@ -13,12 +13,14 @@ from collections import deque
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 
+from yt_gemini.messages import LocalizedError
+
 MINUTE = 60.0
 DAY = 86400.0
 
 
-class RateLimitError(Exception):
-    """可以直接顯示給使用者的錯誤。"""
+class RateLimitError(LocalizedError):
+    """超過呼叫上限。用 render(language) 取得要顯示給使用者的訊息。"""
 
 
 class CallLimiter:
@@ -34,17 +36,14 @@ class CallLimiter:
             self._recent.popleft()
 
         if self._active >= max_concurrent:
-            raise RateLimitError(f"同時進行的影片分析已達上限（{max_concurrent} 個），請等前一個完成再試。")
+            raise RateLimitError("limit_concurrent", limit=max_concurrent)
         last_minute = [t for t in self._recent if now - t < MINUTE]
         if len(last_minute) >= per_minute:
             wait = math.ceil(MINUTE - (now - last_minute[0]))
-            raise RateLimitError(f"每分鐘最多分析 {per_minute} 次，請約 {wait} 秒後再試。")
+            raise RateLimitError("limit_per_minute", limit=per_minute, wait=wait)
         if len(self._recent) >= per_day:
             wait_hours = math.ceil((DAY - (now - self._recent[0])) / 3600)
-            raise RateLimitError(
-                f"24 小時內最多分析 {per_day} 次（保護 Gemini 額度），約 {wait_hours} 小時後恢復。"
-                "上限可在 config.toml 的 [limits] 調整。"
-            )
+            raise RateLimitError("limit_per_day", limit=per_day, hours=wait_hours)
 
         self._recent.append(now)
         self._active += 1

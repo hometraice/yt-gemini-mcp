@@ -1,6 +1,6 @@
 [project]
 name = "yt-gemini-mcp"
-version = "0.6.0"
+version = "0.7.0"
 description = "Local stdio MCP server that lets Claude analyze public YouTube videos through the Gemini API"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -10,6 +10,7 @@ authors = [{ name = "hometraice" }]
 keywords = ["mcp", "claude", "gemini", "youtube", "model-context-protocol"]
 classifiers = [
     "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
     "Programming Language :: Python :: 3.12",
 ]
 # 供應鏈：只允許這三個直接相依套件，版本由 uv.lock 鎖定。

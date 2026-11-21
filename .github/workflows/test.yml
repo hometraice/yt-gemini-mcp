@@ -1,5 +1,5 @@
-# Version: v1.1 | 2026-11-21 | actions 升級到 Node 24 的版本，並鎖定 commit SHA
-# 每次 push／PR 在 Windows 上跑單元測試（只用 mock，不需要也不使用任何 key）。
+# Version: v1.2 | 2026-11-22 | 加上 macOS
+# 每次 push／PR 在 Windows 與 macOS 上跑單元測試（只用 mock，不需要也不使用任何 key）。
 name: tests
 
 on:
@@ -12,7 +12,11 @@ permissions:
 
 jobs:
   unittest:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       # 供應鏈：第三方 action 鎖定 commit SHA（tag 可以被移動，SHA 不行），註解寫對應的版本。

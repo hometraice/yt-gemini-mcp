@@ -18,6 +18,7 @@ _FORBIDDEN_KEY_NAMES = {"api_key", "apikey", "key", "token", "secret", "password
 _MOVED_TO_PROFILES = ("model", "fallback_models", "timeout_seconds", "attempt_timeout_seconds", "thinking_level")
 # 不開放 minimal：gemini-3.8-flash 不支援，送出會錯誤。同一個 profile 的模型共用這個值。
 THINKING_LEVELS = ("low", "medium", "high")
+OUTPUT_LANGUAGES = ("zh-TW", "en")  # 必須和 messages.LANGUAGES 一致
 
 
 class ConfigError(Exception):
@@ -42,6 +43,7 @@ class Settings:
     max_concurrent: int = 2
     max_calls_per_minute: int = 5
     max_calls_per_day: int = 100
+    language: str = "zh-TW"  # 輸出語言（[gemini] output_language）：Gemini 的回答與 server 回給 Claude 的訊息
 
 
 def _model_id(value: object, field: str) -> str:
@@ -66,7 +68,7 @@ def _reject_secrets(raw_text: str, data: dict) -> None:
     if redact(raw_text) != raw_text:
         raise ConfigError(
             "config.toml 裡出現疑似 API key 的內容，已拒絕啟動。"
-            "請刪除它，改用 `uv run set_key.py` 存進 Windows Credential Manager，"
+            "請刪除它，改用 `uv run set_key.py` 存進作業系統的安全儲存區（Windows Credential Manager／macOS Keychain），"
             "並到 Google AI Studio 撤銷（rotate）這把 key。"
         )
 
@@ -160,6 +162,10 @@ def load_settings(path: Path = CONFIG_PATH, profile: str = DEFAULT_PROFILE) -> S
             "備援模型才有時間執行。"
         )
 
+    language = gemini.get("output_language", "zh-TW")
+    if language not in OUTPUT_LANGUAGES:
+        raise ConfigError(f"config.toml：output_language 只能是 {'、'.join(OUTPUT_LANGUAGES)}。")
+
     # 沒有 [limits] 也一定套用預設上限（fail closed：設定漏了不代表不限制）。
     limits = data.get("limits", {})
     if not isinstance(limits, dict):
@@ -176,4 +182,5 @@ def load_settings(path: Path = CONFIG_PATH, profile: str = DEFAULT_PROFILE) -> S
         fallback_models=fallbacks,
         attempt_timeout_seconds=attempt,
         thinking_level=thinking,
+        language=language,
     )

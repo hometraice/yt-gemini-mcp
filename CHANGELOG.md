@@ -7,6 +7,11 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-22 | SPEC.md | v8.0 | 輸出語言可設定（`output_language`：zh-TW／en），Gemini 回答與 server 回給 Claude 的訊息都切換；給 Claude 讀的工具說明、參數說明、server instructions 改英文；key 儲存支援 macOS Keychain（實驗性），依平台固定後端，其他平台拒絕；CI 加 macOS | 讓國際使用者不用改程式就能使用；英文是 MCP 生態的共通語言；涵蓋使用 Claude Code 的 Mac 使用者 |
+| 2026-11-22 | config.toml | v5.0 | 新增 `[gemini] output_language = "zh-TW"`；註解補上 macOS Keychain | 配合 SPEC v8.0 |
+| 2026-11-22 | README.md | v6.0 | 輸出語言設定；macOS 安裝（Homebrew）、Claude Desktop 路徑、Keychain 允許提示；Limitations 改成 macOS 實驗性、Linux 不支援、config 錯誤訊息為中文 | 配合 SPEC v8.0 |
+| 2026-11-22 | README.zh-TW.md | v6.0 | 同上 | 配合 SPEC v8.0 |
+| 2026-11-22 | .github/workflows/test.yml | v1.2 | 用 matrix 同時在 windows-latest 與 macos-latest 跑單元測試（fail-fast: false） | 驗證 macOS 支援 |
 | 2026-11-21 | .github/workflows/test.yml | v1.1 | `actions/checkout` v4 → v7.0.1、`actions/setup-python` v5 → v7.1.0，都改成鎖定 commit SHA；加上版本行 | CI 提醒舊版用的 Node.js 20 已淘汰；SHA 鎖定避免 tag 被移動後執行到不同的程式碼 |
 | 2026-11-21 | SPEC.md | v7.0 | 新增選填的 `transcript`（使用者自己從 YouTube 複製，最長 120,000 字元，清除看不見與控制字元）；轉錄稿包進帶隨機 id 的 `<transcript_reference>` 放在獨立 part；system instruction 規定轉錄稿只是參考資料；工具說明要求 Claude 沒有轉錄稿時先詢問一次；範圍外加上「不自動抓轉錄稿」與原因；結尾標示有沒有附轉錄稿 | 使用者希望提高拼法與原話的準確度；自動抓取違反 YouTube 條款且需連 YouTube；MCP elicitation 只有 Claude Code 終端機版支援，所以改由 Claude 在對話中詢問 |
 | 2026-11-21 | README.md | v5.0 | 新增「Adding a transcript」：取得步驟、用途、為什麼不自動抓、安全處理、長度與隱私提醒；參數表加 `transcript` | 配合 SPEC v7.0 |

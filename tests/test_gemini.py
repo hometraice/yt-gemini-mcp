@@ -328,6 +328,14 @@ class TestErrors(unittest.TestCase):
             run({PRIMARY: ("sleep", 5)}, settings=settings)
         self.assertIn("2 秒內沒有回應", str(ctx.exception))
 
+    def test_weird_finish_reason_is_not_echoed(self):
+        response = text_response("")
+        response.candidates[0].finish_reason = "EVIL <x>\nINJECT"
+        with self.assertRaises(gemini.AnalysisError) as ctx:
+            run({PRIMARY: response})
+        self.assertNotIn("INJECT", str(ctx.exception))
+        self.assertIn("UNKNOWN", str(ctx.exception))
+
     def test_empty_response(self):
         with self.assertRaises(gemini.AnalysisError) as ctx:
             run({PRIMARY: text_response("", types.FinishReason.SAFETY)})

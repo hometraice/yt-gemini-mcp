@@ -36,7 +36,10 @@ def next_reset(now: datetime) -> datetime:
     return reset
 
 
-def format_reset(moment: datetime) -> str:
+def format_reset(moment: datetime, language: str = "zh-TW") -> str:
+    """zh-TW 顯示台灣時間；en 顯示 UTC（國際使用者時區不一，UTC 最不會誤會）。"""
+    if language == "en":
+        return moment.astimezone(timezone.utc).strftime("%m/%d %H:%M UTC")
     return moment.astimezone(TAIWAN).strftime("%m/%d %H:%M") + "（台灣時間）"
 
 

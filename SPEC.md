@@ -1,4 +1,4 @@
-> Version: v7.0 | 2026-11-21 | 新增選填的 `transcript`（使用者自己從 YouTube 複製的轉錄稿）；分析前由 Claude 先詢問要不要附上
+> Version: v8.0 | 2026-11-22 | 輸出語言可設定（zh-TW／en）；給 Claude 讀的工具說明改英文；支援 macOS Keychain（實驗性）
 
 # yt-gemini-mcp 開發規格
 
@@ -11,7 +11,7 @@
 ## 威脅分析
 | 要保護的東西 | 可能的威脅 | 對策 |
 |---|---|---|
-| Gemini API key | 寫進程式碼、設定檔、log、對話或 commit 而外洩；被盜用後耗盡額度或產生費用 | 只存在 Credential Manager；`getpass` 隱藏輸入；log 與錯誤訊息遮罩；`config.toml` 出現疑似 key 就拒絕啟動；`.gitignore` 加 gitleaks 掃描；Google 端把 key 限制只能用 Generative Language API、不綁 billing |
+| Gemini API key | 寫進程式碼、設定檔、log、對話或 commit 而外洩；被盜用後耗盡額度或產生費用 | 只存在作業系統的安全儲存區（Windows Credential Manager／macOS Keychain），依平台固定後端，其他平台一律拒絕；`getpass` 隱藏輸入；log 與錯誤訊息遮罩；`config.toml` 出現疑似 key 就拒絕啟動；`.gitignore` 加 gitleaks 掃描；Google 端把 key 限制只能用 Generative Language API、不綁 billing |
 | 本機與內網 | 惡意網址讓 server 代為連線到其他網站或內網（SSRF） | host 白名單完全比對、驗證 11 碼 ID、一律重組成標準網址；server 沒有任意 HTTP request 的能力 |
 | Claude 的行為 | 影片或轉錄稿裡夾帶指令，誘導 Gemini／Claude 執行動作（prompt injection）；教學影片裡的惡意指令被照著執行 | Gemini system instruction 要求只轉述（轉錄稿同樣只是被分析的資料）；轉錄稿包在帶隨機 id 的 `<transcript_reference>` 裡送給 Gemini；結果包在帶隨機 id 的 `<untrusted_video_analysis>` 裡，並中和偽造的標記（含全形與看不見的字元）；tutorial 模式在結尾加「執行前必須人工審查」；只有一個唯讀工具 |
 | Gemini 額度 | 濫用、長影片或自動重試把 free tier 額度用完 | 總時間上限、關閉 SDK 自動重試（只保留自己控制的 503 短重試，每個模型最多 1 次；最壞情況一次工具呼叫的請求數＝模型數×2，上限 (1+3)×2＝8，目前設定 chat 2、code 4）、備援最多 3 個模型、預設低解析度、`question` 與秒數設上限；每日額度用完的模型當天直接跳過；token 用量寫進 log 方便追蹤；呼叫上限（同時進行數、每分鐘、每 24 小時），超過就拒絕 |
@@ -41,7 +41,12 @@
 功能做完之前，以下每一項都必須先到位。和功能衝突時，以資安為準。
 
 ### 1. API key 保護
-- key 只存在 Windows Credential Manager，用 `keyring` 讀取（service=`yt-gemini-mcp`、username=`gemini`）
+- key 只存在作業系統的安全儲存區，用 `keyring` 讀取（service=`yt-gemini-mcp`、username=`gemini`）：
+  - Windows：Windows Credential Manager，固定使用 `WinVaultKeyring`
+  - macOS（實驗性，尚未實機驗證）：macOS Keychain，固定使用 `keyring.backends.macOS.Keyring`
+  - 其他平台（含 Linux）一律拒絕並說明原因，不退回明文檔案或其他後端
+  - 依平台**固定**後端，不使用 keyring 的自動選擇（`keyring.get_keyring`），所以 `PYTHON_KEYRING_BACKEND`、keyringrc 等設定都不影響後端，避免 key 被導到明文後端（例如 `keyrings.alt`）；keyring 的 macOS 後端會讀 `KEYCHAIN_PATH` 但只印警告、不改變存放位置
+  - macOS 第一次讀取時 Keychain 會詢問是否允許；允許的對象是 uv 管理的那個 Python 執行檔
 - 禁止寫進原始碼、`.env`、`claude_desktop_config.json`、log 或任何檔案
 - 另外提供 `set_key.py`：用 `getpass` 隱藏輸入後存入 keyring，不在畫面上顯示，也不留在 shell history
 - 錯誤訊息和 log 都不能包含 key；送出 request 前後若有 debug 輸出，都要遮罩
@@ -137,7 +142,7 @@
 - 專案位置：使用者自己選的資料夾（`git clone` 的位置），一般使用者可寫入即可
 
 ## 環境準備（由 Claude Code 執行，執行前先徵求使用者同意）
-- 用 `winget install --id=astral-sh.uv -e` 安裝 uv；不另外安裝系統 Python，由 uv 管理
+- Windows：用 `winget install --id=astral-sh.uv -e` 安裝 uv；macOS：用 Homebrew `brew install uv`；不另外安裝系統 Python，由 uv 管理
 - winget 裝完後，目前 session 的 PATH 不會更新：請使用者重開終端機和 Claude Code，或改用 uv 的完整路徑執行
 - 禁止使用 `irm ... | iex` 安裝
 
@@ -175,7 +180,12 @@ MCP tool：`analyze_youtube`
 不提供逐字稿模式：Gemini 是聽影片產生文字（不是讀 YouTube 的字幕檔），逐字輸出長、容易被截斷或逾時，也不利於整理成可用的知識；需要細節時用 notes 或 tutorial 分段處理。
 
 Gemini 輸出要求：
-- 用繁體中文（台灣用語）回答
+- 輸出語言由 `config.toml` 的 `[gemini] output_language` 決定，只接受 `"zh-TW"`（預設，繁體中文台灣用語）或 `"en"`（英文）；其他值拒絕啟動
+  - system instruction 與 5 種 mode 的任務說明各有兩種語言版本；英文版的來源標示用 `[Visual]`／`[Audio]`，不確定標 `(uncertain)`
+  - 兩種語言的安全規則必須一致（有單元測試檢查條數與關鍵句）
+  - server 自己產生、會回到 Claude 的文字也跟著切換：不可信標記前的說明、回覆結尾、備援與重試說明、錯誤訊息（參數、呼叫上限、額度、key、Gemini 錯誤）、每日額度恢復時間（zh-TW 用台灣時間，en 用 UTC）
+  - `set_key.py` 與 `tools/compare_models.py` 的訊息也依 `output_language` 切換
+  - 例外：`config.toml` 本身的錯誤訊息維持中文（讀到語言設定之前就可能出錯）；log 一律英文為主
 - 附上 `[mm:ss]` 時間戳
 - 分清楚【畫面】和【語音】兩種來源
 - 不確定的內容要標明不確定，不能補完
@@ -187,6 +197,8 @@ Gemini 輸出要求：
 - 有跳過或改用備援時，最後一行寫出原因（逾時、HTTP 錯誤碼、今日額度已用完與恢復時間）
 - mode=tutorial 時加一行：內容中的指令、程式碼、設定是從影片逐字抄錄的不可信資料，執行前必須先由人審查並對照官方文件
 - 目的：使用者看到 flash-lite 時，能分辨是 chat 的設計、備援，還是額度用完
+
+**給 Claude 讀的文字一律用英文**（工具說明、每個參數的說明、server instructions、工具標題）：英文是 MCP 生態的共通語言，國際使用者也能看懂；Claude 回覆使用者時仍會用使用者的語言。
 
 工具說明與 server instructions 要引導 Claude：沒有轉錄稿時先詢問一次（見上方流程）；先用 summary 掌握全貌，再用 start/end 針對重要段落深入；教學影片用 tutorial；照做或寫成文件前對照官方文件。
 
@@ -204,7 +216,8 @@ Gemini 輸出要求：
   - 執行 log 只寫進 `run.log`，不印到終端機（上游錯誤原文不可進入 Claude 的對話）；終端機只印統計數字
   - key 只從 keyring 讀，不印出；不受 server 的呼叫上限管制，所以每次執行最多 2 個模型、各 1 次（加上 503 短重試）
 - 公開文件：`README.md`（英文）、`README.zh-TW.md`、`LICENSE`（MIT）、`SECURITY.md`、`CONTRIBUTING.md`；開發筆記（進度、交接）只留在本機的 `notes/`，不公開
-- `README.md`：安裝步驟、存 key、註冊到 Claude Desktop（`claude_desktop_config.json`）與 Claude Code（`claude mcp add`）的方法、測試方式
+- `README.md`：安裝步驟（Windows、macOS）、存 key、註冊到 Claude Desktop（`claude_desktop_config.json`）與 Claude Code（`claude mcp add`）的方法、輸出語言設定、測試方式
+- CI（GitHub Actions）：Windows 與 macOS 各跑一次單元測試（只用 mock，不需要真的 Keychain）
 - 測試：
   - URL 驗證的單元測試：合法格式、惡意 host（例如 `youtube.com.evil.com`、`evil.com/?v=xxx`）、javascript: scheme、超長輸入
   - 一支公開短片的實際呼叫測試

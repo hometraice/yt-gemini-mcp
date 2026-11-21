@@ -190,10 +190,11 @@ class TestServerTranscript(unittest.TestCase):
         self.assertIn("transcript 太長", str(ctx.exception))
 
     def test_instructions_tell_claude_to_ask_first(self):
-        self.assertIn("顯示轉錄稿", server.mcp.instructions)
-        self.assertIn("直接分析", server.mcp.instructions)
+        self.assertIn("Show transcript", server.mcp.instructions)
+        self.assertIn("just analyze", server.mcp.instructions)
+        self.assertIn("ask once", server.mcp.instructions)
         tools = asyncio.run(server.mcp.list_tools())
-        self.assertIn("原封不動", tools[0].input_schema["properties"]["transcript"]["description"])
+        self.assertIn("exactly", tools[0].input_schema["properties"]["transcript"]["description"])
 
 
 if __name__ == "__main__":
