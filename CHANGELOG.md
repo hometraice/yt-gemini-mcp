@@ -7,6 +7,8 @@ Changes to versioned documents and config files (newest first, in Traditional Ch
 
 | 日期 | 文件 | 版本 | 改了什麼 | 為什麼 |
 |---|---|---|---|---|
+| 2026-11-22 | README.md | v8.2 | 新增：什麼時候值得貼轉錄稿的對照表；Google 下線或改名模型時的換模型步驟（官方模型清單與棄用公告連結、`--check`）；其他 MCP 用戶端的務實說明，建議設 `ask_for_transcript = false` | 外部建議：降低轉錄稿上手門檻、模型時效性、說明相容範圍但不誇大；行為不變 |
+| 2026-11-22 | README.zh-TW.md | v8.2 | 同上 | 同上 |
 | 2026-11-22 | SPEC.md | v10.1 | 更正例子：Chat 與 Code 分頁實測都會跳出轉錄稿按鈕，「沒有按鈕」不再舉 Chat 為例 | 使用者實測 v0.8.1，Chat 也有按鈕；行為不變 |
 | 2026-11-22 | README.md | v8.1 | 同上 | 同上 |
 | 2026-11-22 | README.zh-TW.md | v8.1 | 同上 | 同上 |

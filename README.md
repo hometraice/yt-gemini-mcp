@@ -1,4 +1,4 @@
-> Version: v8.1 | 2026-11-22 | Correction: Claude Desktop chat and the Code tab both show the transcript buttons
+> Version: v8.2 | 2026-11-22 | When a transcript is worth pasting; changing models when Google retires one; other MCP clients
 
 # yt-gemini-mcp
 
@@ -37,6 +37,8 @@ Found a vulnerability? Please report it privately as described in [SECURITY.md](
 - [uv](https://docs.astral.sh/uv/) (manages Python for you)
 - A Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey)
 - Claude Code and/or Claude Desktop
+
+**Other MCP clients:** any AI tool that supports local stdio MCP servers can try connecting to it, but it has only been fully tested and tuned with Claude Desktop and Claude Code. The transcript question relies on Claude following the server's instructions (clickable options, then calling again); other clients may not, and may only ever get the "add a transcript?" note for each new video. If you use another client, set `ask_for_transcript = false` in `config.toml`.
 
 ## Installation
 
@@ -183,6 +185,14 @@ The first time you analyze a video without a transcript, the server does not cal
 2. Click **Show transcript**
 3. Select all of the transcript, copy it, and paste it into the chat
 
+When is it worth it?
+
+| Paste a transcript | Just send the link |
+|---|---|
+| You want exact quotes (`quotes` mode) | You only want the gist (`summary`) |
+| Many names, products or technical terms | Mostly visual videos: demos, scenery, gameplay |
+| Talk-heavy videos: interviews, lectures, podcasts | Short videos, or the video has no transcript |
+
 Gemini still watches the video for what is on screen; the transcript is used for exact names and quotes. Where it disagrees with the audio, the result says so. Answer "just analyze" (or "don't ask again") to skip. To turn the question off entirely, set `ask_for_transcript = false` in `config.toml`; results without a transcript then end with a one-line tip instead.
 
 - The server never fetches transcripts itself: unofficial scrapers break YouTube's terms and the official API only serves captions for your own videos
@@ -244,6 +254,17 @@ Each entry point (profile) has its own models and limits; pick one with `--profi
 - `[gemini] max_output_tokens` — response length cap (default 16384)
 - `[limits]` — `max_concurrent` (2), `max_calls_per_minute` (5), `max_calls_per_day` (100, rolling 24 h). Limits always apply, even if the section is missing
 - `temperature` is not used (deprecated for Gemini 3 models); the server refuses to start if it is present
+
+### When Google renames or retires a model
+
+Model IDs live only in `config.toml`, so switching models needs no code change:
+
+1. If a model has been retired, calls fail with "Model not found … Check that the model IDs in config.toml are currently available"
+2. Pick a current model from Google's [model list](https://aistudio.google.com/docs/models) (retirement dates are on the [deprecations page](https://aistudio.google.com/docs/deprecations)) and replace `model` / `fallback_models` in the profile
+3. Run `uv run set_key.py --check` — it confirms every model in `config.toml` exists, without using generation quota
+4. Fully restart Claude Desktop (Claude Code picks it up in a new session)
+
+If a future model rejects `thinking_level`, remove that line from the profile to use the model's default. A code change would only be needed if Google changes the API itself.
 
 ### Gemini free tier notes (checked against Google's docs, 2026-11)
 

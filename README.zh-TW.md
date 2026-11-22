@@ -1,4 +1,4 @@
-> Version: v8.1 | 2026-11-22 | 更正：Claude Desktop 的 Chat 與 Code 分頁實測都會跳出轉錄稿按鈕
+> Version: v8.2 | 2026-11-22 | 什麼時候值得貼轉錄稿；Google 下線或改名模型時怎麼換；其他 MCP 用戶端
 
 # yt-gemini-mcp
 
@@ -83,6 +83,8 @@ yt-gemini-mcp/
 ## 安裝
 
 需求：Windows 10/11 或 macOS（實驗性，見下方）、Git、一般使用者權限（不需要系統管理員）。
+
+**其他 MCP 用戶端**：任何支援本機 stdio MCP 的 AI 工具皆可嘗試介接，目前已針對 Claude Desktop 與 Claude Code 完整實測與調校。「要不要附轉錄稿」的詢問靠 Claude 照 server 的說明做（跳按鈕、再呼叫一次），其他工具不一定會照做，可能每支新影片都只拿到提示、沒有分析結果。用其他工具時，建議把 `config.toml` 的 `ask_for_transcript` 改成 `false`。
 
 **1. 安裝 uv**（不用另外裝 Python，uv 會管理）
 
@@ -249,6 +251,14 @@ claude mcp list
 2. 點「顯示轉錄稿」
 3. 把轉錄稿全選、複製，貼回對話
 
+什麼時候值得貼？
+
+| 建議貼轉錄稿 | 直接丟連結就好 |
+|---|---|
+| 要逐字引用原話（`quotes`） | 只想知道大意（`summary`） |
+| 人名、產品名、專有名詞很多 | 以畫面為主：操作示範、風景、遊戲 |
+| 以說話為主：訪談、講座、Podcast | 很短的影片，或影片本身沒有轉錄稿 |
+
 - 畫面上的內容仍由 Gemini 看影片判斷；轉錄稿用來對照專有名詞拼法和原話。轉錄稿和語音對不上時，結果會標出來
 - 不想附就回「直接分析」；說「不要再問」，之後就不會再問
 - 完全不想被問：把 `config.toml` 的 `ask_for_transcript` 改成 `false`。沒附轉錄稿的結果，結尾會多一行提示
@@ -314,6 +324,17 @@ Claude 不會因為看過影片就「記住」。要讓它以後都會用，要�
 - `[gemini]` 的 `ask_for_transcript`：`true`（預設）或 `false`。開啟時，每支影片第一次分析、沒附轉錄稿，會先問你要不要附上
 - `[gemini]` 的 `max_output_tokens`：回應長度上限，預設 16384
 - 不使用 `temperature`：官方已棄用 Gemini 3 系列的這個參數，`config.toml` 裡有它的話 server 會拒絕啟動
+
+**Google 下線或改名模型時**
+
+模型 ID 只寫在 `config.toml`，換模型不用改程式：
+
+1. 模型被下線時，呼叫會失敗並顯示「找不到模型…請檢查 config.toml 的模型 ID 是否為目前可用的模型」
+2. 到 Google 的[模型清單](https://aistudio.google.com/docs/models)挑目前可用的模型（下線時間看[棄用公告](https://aistudio.google.com/docs/deprecations)），改掉該 profile 的 `model`／`fallback_models`
+3. 執行 `uv run set_key.py --check`，確認 `config.toml` 裡每個模型都存在（不消耗生成額度）
+4. 完全重開 Claude Desktop（Claude Code 開新 session 就會讀到）
+
+未來的模型如果不接受 `thinking_level`，把該 profile 的這一行刪掉，就會用模型的預設值。只有 Google 改了 API 本身，才需要改程式。
 
 **Free tier 的限制**（2026-11 對照官方文件）
 
